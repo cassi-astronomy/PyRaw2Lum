@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .core import AnalysisResult, msa_to_luminance
+from .i18n import tr
 from .palette import (
     HOLLAN_LOG_BASE_LUMINANCE,
     HOLLAN_LOG_HALF_STEP,
@@ -80,6 +81,7 @@ def _draw_compass_on_round_map(
     map_width: int,
     map_height: int,
     border: int,
+    language: str = "cs",
 ) -> None:
     """Popisky v samostatnem cernem ramu kolem kruhove mapy."""
 
@@ -88,19 +90,22 @@ def _draw_compass_on_round_map(
     center_x = map_left + map_width / 2.0
     center_y = map_top + map_height / 2
     vertical_offset = max(2, (border - font_size) / 2.0 - 2)
-    _centered(draw, (center_x, map_top - border + vertical_offset), "S", font, "white")
-    _centered(draw, (center_x, map_top + map_height + vertical_offset), "J", font, "white")
+    north, south, west, east = (
+        ("N", "S", "W", "E") if language == "en" else ("S", "J", "Z", "V")
+    )
+    _centered(draw, (center_x, map_top - border + vertical_offset), north, font, "white")
+    _centered(draw, (center_x, map_top + map_height + vertical_offset), south, font, "white")
     _centered(
         draw,
         (map_left - border / 2.0, center_y - font_size / 2.0),
-        "Z",
+        west,
         font,
         "white",
     )
     _centered(
         draw,
         (map_left + map_width + border / 2.0, center_y - font_size / 2.0),
-        "V",
+        east,
         font,
         "white",
     )
@@ -135,18 +140,18 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     draw = ImageDraw.Draw(canvas)
     if result.north_angle_deg is not None or result.orientation_matrix is not None:
         _draw_compass_on_round_map(
-            draw, map_left, map_top, map_image.width, map_image.height, border
+            draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
 
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
     tick_font = _font(max(17, int(width * 0.0075)))
     small_font = _font(max(16, int(width * 0.007)))
-    title = "Mapa jasu oblohy"
+    title = tr("Mapa jasu oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
     _centered(draw, (width / 2, top * 0.19), title, title_font, "white")
-    subtitle = f"Zenit: {result.zenith_msa:.2f} mag/arcsec²"
+    subtitle = f"{tr('Zenit', result.language)}: {result.zenith_msa:.2f} mag/arcsec²"
     _centered(draw, (width / 2, top * 0.62), subtitle, normal_font, (220, 220, 220))
 
     legend_top = top + framed_height + max(35, int(width * 0.014))
@@ -178,7 +183,7 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     unit_x = legend_right + max(14, int(width * 0.006))
     draw.text((unit_x, label_y), "mag/arcsec²", font=small_font, fill="white", anchor="la")
     exif = result.exif
-    captured = result.captured_at_utc or "čas neuveden"
+    captured = result.captured_at_utc or ("time unavailable" if result.language == "en" else "čas neuveden")
     info = (
         f"{captured}  |  {exif.camera_model}  |  {result.profile.lens_name}  |  "
         f"{exif.exposure_s:g} s  ·  ISO {exif.iso:g}  ·  f/{exif.aperture:g}"
@@ -222,18 +227,18 @@ def render_luminance_map(
     draw = ImageDraw.Draw(canvas)
     if result.north_angle_deg is not None or result.orientation_matrix is not None:
         _draw_compass_on_round_map(
-            draw, map_left, map_top, map_image.width, map_image.height, border
+            draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
     tick_font = _font(max(17, int(width * 0.0075)))
     upper_tick_font = _font(max(20, int(width * 0.009)), bold=True)
     small_font = _font(max(16, int(width * 0.007)))
-    title = "Mapa luminance oblohy"
+    title = tr("Mapa luminance oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
     _centered(draw, (width / 2, top * 0.19), title, title_font, "white")
-    subtitle = f"Zenit: {result.zenith_cd_m2:.7f} cd/m²"
+    subtitle = f"{tr('Zenit', result.language)}: {result.zenith_cd_m2:.7f} cd/m²"
     _centered(draw, (width / 2, top * 0.62), subtitle, normal_font, (220, 220, 220))
 
     legend_top = top + framed_height + max(82, int(width * 0.032))
@@ -289,7 +294,9 @@ def render_luminance_map(
     unit_x = legend_right + max(14, int(width * 0.006))
     draw.text((unit_x, label_y), "cd/m²", font=small_font, fill="white", anchor="la")
     exif = result.exif
-    captured = result.captured_at_utc or "čas neuveden"
+    captured = result.captured_at_utc or (
+        "time unavailable" if result.language == "en" else "čas neuveden"
+    )
     info = (
         f"{captured}  |  {exif.camera_model}  |  {result.profile.lens_name}  |  "
         f"{exif.exposure_s:g} s  ·  ISO {exif.iso:g}  ·  f/{exif.aperture:g}"
@@ -395,19 +402,21 @@ def render_blue_fraction_map(
     canvas.paste(map_image, (map_left, map_top))
     draw = ImageDraw.Draw(canvas)
     if result.north_angle_deg is not None or result.orientation_matrix is not None:
-        _draw_compass_on_round_map(draw, map_left, map_top, map_image.width, map_image.height, border)
+        _draw_compass_on_round_map(
+            draw, map_left, map_top, map_image.width, map_image.height, border, result.language
+        )
 
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
     tick_font = _font(max(17, int(width * 0.0075)))
     small_font = _font(max(16, int(width * 0.007)))
-    title = "Barevný index oblohy – podíl modrého RAW kanálu"
+    title = tr("Barevný index oblohy – podíl modrého RAW kanálu", result.language)
     if result.location:
         title += f" – {result.location}"
     _centered(draw, (width / 2, top * 0.13), title, title_font, "white")
     summary = result.zenith_color
     subtitle = (
-        f"Zenit: B {100.0 * summary.blue_fraction:.1f} %  ·  "
+        f"{tr('Zenit', result.language)}: B {100.0 * summary.blue_fraction:.1f} %  ·  "
         f"B/G {summary.blue_green_ratio:.3f}  ·  R/G {summary.red_green_ratio:.3f}"
     )
     _centered(draw, (width / 2, top * 0.57), subtitle, normal_font, (220, 220, 220))
@@ -429,12 +438,12 @@ def render_blue_fraction_map(
         draw.line((xpos, legend_top + bar_height, xpos, legend_top + bar_height + 8), fill="white")
         _centered(draw, (xpos, label_y), f"{100*tick:.0f} %", tick_font, "white")
     draw.text((legend_right + 35, label_y), "B/(R+G+B)", font=small_font, fill="white")
-    warning = (
+    warning = tr((
         "Experimentální relativní RGB index; nejde o spektrum ani o fotopickou, "
         "skotopickou či melanopickou luminanci."
-    )
+    ), result.language)
     _centered(draw, (width / 2, label_y + max(52, int(width * 0.024))), warning, small_font, (190, 190, 190))
-    captured = result.captured_at_utc or "čas neuveden"
+    captured = result.captured_at_utc or ("time unavailable" if result.language == "en" else "čas neuveden")
     info = f"{captured}  |  {result.exif.camera_model}  |  {result.profile.lens_name}"
     _centered(draw, (width / 2, label_y + max(100, int(width * 0.045))), info, small_font, (160, 160, 160))
     canvas.save(Path(output_path), format="PNG", optimize=True)
@@ -580,21 +589,36 @@ def _panorama_base(
     horizon_fraction = (math.pi / 2.0) / max_zenith_distance
     horizon_y = top + int(round((map_height - 1) * horizon_fraction))
     map_bottom = top + map_height
-    for fraction, label in zip((0.0, 0.25, 0.5, 0.75, 1.0), ("J", "Z", "S", "V", "J")):
+    compass = (
+        ("S", "W", "N", "E", "S")
+        if result.language == "en"
+        else ("J", "Z", "S", "V", "J")
+    )
+    for fraction, label in zip((0.0, 0.25, 0.5, 0.75, 1.0), compass):
         x = min(width - 1, int(fraction * width))
         draw.line((x, top, x, map_bottom), fill=(150, 150, 150), width=1)
         anchor_x = max(12, min(width - 12, x))
         _centered(draw, (anchor_x, map_bottom + 10), label, compass_font, "white")
     draw.line((0, horizon_y, width, horizon_y), fill="white", width=2)
-    draw.text((10, top + 5), "zenit", font=normal_font, fill=(225, 225, 225))
-    draw.text((10, horizon_y - 30), "obzor", font=normal_font, fill=(225, 225, 225))
+    draw.text(
+        (10, top + 5),
+        tr("Zenit", result.language),
+        font=normal_font,
+        fill=(225, 225, 225),
+    )
+    draw.text(
+        (10, horizon_y - 30),
+        tr("obzor", result.language),
+        font=normal_font,
+        fill=(225, 225, 225),
+    )
     legend_top = map_bottom + compass_height + max(18, int(width * 0.012))
     return canvas, draw, legend_top, top, map_height
 
 
 def _panorama_info(result: AnalysisResult) -> str:
     exif = result.exif
-    captured = result.captured_at_utc or "čas neuveden"
+    captured = result.captured_at_utc or ("time unavailable" if result.language == "en" else "čas neuveden")
     return (
         f"{captured}  |  {exif.camera_model}  |  "
         f"{exif.exposure_s:g} s  ·  ISO {exif.iso:g}  ·  f/{exif.aperture:g}"
@@ -613,11 +637,11 @@ def render_msa_panorama(
     shape = (360 * display_scale, 1440 * display_scale)
     panorama = fisheye_to_panorama(result.msa, result, shape)
     rgb = colorize(msa_to_luminance(panorama))
-    title = "Panorama jasu oblohy"
+    title = tr("Panorama jasu oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
     canvas, draw, legend_top, _top, _height = _panorama_base(
-        result, rgb, title, f"Zenit: {result.zenith_msa:.2f} mag/arcsec²"
+        result, rgb, title, f"{tr('Zenit', result.language)}: {result.zenith_msa:.2f} mag/arcsec²"
     )
     width = canvas.width
     left, right = int(width * 0.08), int(width * 0.88)
@@ -652,11 +676,11 @@ def render_luminance_panorama(
     shape = (360 * display_scale, 1440 * display_scale)
     panorama = fisheye_to_panorama(result.luminance_cd_m2, result, shape)
     rgb = colorize_hollan_luminance(panorama)
-    title = "Panorama luminance oblohy"
+    title = tr("Panorama luminance oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
     canvas, draw, legend_top, _top, _height = _panorama_base(
-        result, rgb, title, f"Zenit: {result.zenith_cd_m2:.7f} cd/m²"
+        result, rgb, title, f"{tr('Zenit', result.language)}: {result.zenith_cd_m2:.7f} cd/m²"
     )
     width = canvas.width
     left, right = int(width * 0.08), int(width * 0.88)

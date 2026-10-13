@@ -1,5 +1,7 @@
 # PyRaw2Lum
 
+[Čeština](README.md) | [English](README.en.md)
+
 PyRaw2Lum převádí celooblohové DSLR RAW snímky na absolutně kalibrované mapy
 jasu oblohy v **mag/arcsec² (MSA)** a **cd/m²**. Navazuje na program
 `raw2lum 1.35` Jana Hollana a zachovává jeho kalibraci, barevné stupnice,
@@ -77,6 +79,13 @@ spustit také přímo:
 ```powershell
 python -m raw2lum
 ```
+
+## Jazyk programu
+
+V nabídce **Jazyk / Language** lze za běhu přepnout celé GUI mezi češtinou a
+angličtinou. Volba se uloží a použije při příštím spuštění. Ve zvoleném jazyce
+se vytvářejí také nadpisy, světové strany, popisy legend a diagnostické grafy;
+číselné jednotky a názvy datových souborů se nemění.
 
 ## Základní pracovní postup
 
@@ -387,7 +396,8 @@ Základní dávkové zpracování lze spustit také bez GUI:
 python -m raw2lum.cli snimek1.CR2 snimek2.CR2 `
   --dark dark_30s.CR2 dark_180s.CR2 `
   --output vystup `
-  --timezone Europe/Prague
+  --timezone Europe/Prague `
+  --language cs
 ```
 
 Volby:
@@ -396,6 +406,7 @@ Volby:
 - `--location "Jizerka"` – společná lokalita pro zadanou dávku,
 - `--timezone Europe/Prague` – zóna času uloženého v EXIFu,
 - `--north-angle` – pokročilé ruční zadání obrazového úhlu severu.
+- `--language cs|en` – jazyk popisů ve vytvořených obrázcích a hlášení.
 
 Astrometrické označování hvězd je dostupné v GUI.
 

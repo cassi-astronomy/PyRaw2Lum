@@ -17,6 +17,8 @@ from astropy.time import Time
 import astropy.units as u
 from PIL import Image, ImageDraw
 
+from .i18n import tr
+
 from .core import AnalysisResult, analyze_raw
 
 
@@ -682,15 +684,19 @@ def make_bouguer_plot(result: ExtinctionResult) -> Image.Image:
         color = "#1257b0" if item.used else "#aaaaaa"
         radius = 4 if item.used else 3
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
-    draw.text((left, 22), "Bougueruv diagram atmosfericke extinkce", fill="#111111")
+    draw.text(
+        (left, 22), tr("Bougueruv diagram atmosfericke extinkce"), fill="#111111"
+    )
     draw.text(
         (left + 390, 22),
         f"k = {result.extinction_mag_per_airmass:.4f} +/- "
         f"{result.extinction_std_error:.4f} mag/airmass; RMS = {result.fit_rms_mag:.3f} mag",
         fill="#111111",
     )
-    draw.text((left + 390, 650), "Vzduchova hmota X", fill="#111111")
-    draw.text((left, 650), "modre = pouzite, sede = odmitnute", fill="#555555")
+    draw.text((left + 390, 650), tr("Vzduchova hmota X"), fill="#111111")
+    draw.text(
+        (left, 650), tr("modre = pouzite, sede = odmitnute"), fill="#555555"
+    )
     draw.text((12, 45), "m_inst - V - C(B-V)", fill="#111111")
     return image
 

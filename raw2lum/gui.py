@@ -7,7 +7,10 @@ import queue
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog as tk_filedialog
+from tkinter import messagebox as tk_messagebox
+from tkinter import simpledialog as tk_simpledialog
+from tkinter import ttk
 
 import numpy as np
 from PIL import Image, ImageTk
@@ -26,6 +29,7 @@ from .extinction import (
     mid_exposure_utc,
     save_extinction_result,
 )
+from .i18n import LANGUAGES, load_language, set_language, tr
 from .profiles import profile_for_camera
 from .vignetting import save_vignetting_calibration
 from .vignetting_calibration import calibrate_vignetting, make_vignetting_plot
@@ -47,13 +51,41 @@ for _offset in range(-12, 15):
         TIMEZONE_CHOICES.append(
             (f"Jiný pevný posun UTC{_offset:+03d}:00", f"UTC{_offset:+03d}:00")
         )
-TIMEZONE_BY_LABEL = dict(TIMEZONE_CHOICES)
+
+
+class _LocalizedDialogProxy:
+    def __init__(self, module) -> None:
+        self.module = module
+
+    def __getattr__(self, name):
+        function = getattr(self.module, name)
+
+        def localized(*args, **kwargs):
+            converted = tuple(tr(value) if isinstance(value, str) else value for value in args)
+            for key in ("title", "message", "prompt"):
+                if isinstance(kwargs.get(key), str):
+                    kwargs[key] = tr(kwargs[key])
+            if "filetypes" in kwargs:
+                kwargs["filetypes"] = [
+                    (tr(label), pattern) for label, pattern in kwargs["filetypes"]
+                ]
+            return function(*converted, **kwargs)
+
+        return localized
+
+
+filedialog = _LocalizedDialogProxy(tk_filedialog)
+messagebox = _LocalizedDialogProxy(tk_messagebox)
+simpledialog = _LocalizedDialogProxy(tk_simpledialog)
 
 
 class PyRaw2LumApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("PyRaw2Lum – měření jasu oblohy")
+        self.language_code = load_language()
+        set_language(self.language_code)
+        self.language_choice = tk.StringVar(value=LANGUAGES[self.language_code])
+        self.title(tr("PyRaw2Lum – měření jasu oblohy"))
         self.geometry("1040x900")
         self.minsize(880, 760)
         self.lights: list[Path] = []
@@ -65,7 +97,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.last_site_coordinates: tuple[float, float] | None = None
         self.darks: list[Path] = []
         self.output_path = tk.StringVar(value=str(Path.cwd() / "vystup"))
-        self.timezone_choice = tk.StringVar(value=TIMEZONE_CHOICES[0][0])
+        self.timezone_choice = tk.StringVar(value=tr(TIMEZONE_CHOICES[0][0]))
         self.scale = tk.IntVar(value=2)
         self.extinction_light = tk.StringVar()
         self.extinction_catalog = tk.StringVar()
@@ -80,7 +112,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.after(100, self._poll_messages)
 
     def _build(self) -> None:
+        self._build_menu()
         notebook = ttk.Notebook(self)
+        self.notebook = notebook
         notebook.pack(fill="both", expand=True)
         root = ttk.Frame(notebook, padding=18)
         notebook.add(root, text="Jas oblohy")
@@ -167,7 +201,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         timezone_box = ttk.Combobox(
             timezone_row,
             textvariable=self.timezone_choice,
-            values=[label for label, _value in TIMEZONE_CHOICES],
+            values=[tr(label) for label, _value in TIMEZONE_CHOICES],
             state="readonly",
         )
         timezone_box.pack(side="left", fill="x", expand=True)
@@ -200,6 +234,59 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         vignetting_tab = ttk.Frame(notebook, padding=18)
         notebook.add(vignetting_tab, text="Kalibrace vinětace")
         self._build_vignetting_tab(vignetting_tab)
+        self._localize_widget_tree(notebook)
+        for tab_id in notebook.tabs():
+            notebook.tab(tab_id, text=tr(notebook.tab(tab_id, "text")))
+        for column in ("file", "location", "orientation"):
+            self.light_table.heading(
+                column, text=tr(self.light_table.heading(column, "text"))
+            )
+
+    def _build_menu(self) -> None:
+        menu = tk.Menu(self)
+        language_menu = tk.Menu(menu, tearoff=False)
+        for code, label in LANGUAGES.items():
+            language_menu.add_radiobutton(
+                label=label,
+                variable=self.language_choice,
+                value=label,
+                command=lambda selected=code: self._switch_language(selected),
+            )
+        menu.add_cascade(label="Jazyk / Language", menu=language_menu)
+        self.configure(menu=menu)
+
+    def _switch_language(self, language: str) -> None:
+        if language == self.language_code:
+            return
+        timezone = self._timezone_value()
+        self.language_code = language
+        set_language(language, persist=True)
+        self.language_choice.set(LANGUAGES[language])
+        self.title(tr("PyRaw2Lum – měření jasu oblohy"))
+        self.notebook.destroy()
+        self.timezone_choice.set(
+            next(tr(label) for label, value in TIMEZONE_CHOICES if value == timezone)
+        )
+        self._build()
+        self._refresh_lights()
+        self._refresh_darks()
+        self._refresh_calibration_images()
+
+    def _timezone_value(self) -> str:
+        selected = self.timezone_choice.get()
+        for label, value in TIMEZONE_CHOICES:
+            if selected in (label, tr(label, "en")):
+                return value
+        return "Europe/Prague"
+
+    def _localize_widget_tree(self, widget) -> None:
+        for child in widget.winfo_children():
+            try:
+                if "text" in child.keys():
+                    child.configure(text=tr(child.cget("text")))
+            except tk.TclError:
+                pass
+            self._localize_widget_tree(child)
 
     def _build_extinction_tab(self, root: ttk.Frame) -> None:
         ttk.Label(root, text="Atmosférická extinkce", font=("Segoe UI", 20, "bold")).pack(
@@ -441,7 +528,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 values=(
                     str(path),
                     self.locations.get(path, ""),
-                    (
+                    tr(
                         "astrometrie"
                         if path in self.orientation_matrices
                         else "směr určen"
@@ -501,7 +588,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             profile = profile_for_camera(exif.camera_model)
             captured_at_utc = exif_time_to_utc(
                 exif.captured_at,
-                TIMEZONE_BY_LABEL[self.timezone_choice.get()],
+                self._timezone_value(),
             )
             astrometry_at_utc = (
                 mid_exposure_utc(captured_at_utc, exif.exposure_s)
@@ -513,7 +600,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             return
 
         dialog = tk.Toplevel(self)
-        dialog.title(f"Orientace panoramatu – {path.name}")
+        dialog.title(f"{tr('Orientace panoramatu')} – {path.name}")
         dialog.transient(self)
         dialog.grab_set()
         ttk.Label(
@@ -603,13 +690,14 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             "x": None,
             "y": None,
         }
-        reference_direction = tk.StringVar(value="Sever (S)")
-        direction_azimuth = {
-            "Sever (S)": 0.0,
-            "Východ (V)": 90.0,
-            "Jih (J)": 180.0,
-            "Západ (Z)": 270.0,
-        }
+        directions = (
+            ("Sever (S)", 0.0),
+            ("Východ (V)", 90.0),
+            ("Jih (J)", 180.0),
+            ("Západ (Z)", 270.0),
+        )
+        reference_direction = tk.StringVar(value=tr(directions[0][0]))
+        direction_azimuth = {tr(label): azimuth for label, azimuth in directions}
         marker_ids: list[int] = []
         star_marker_ids: list[int] = []
         matches: list[StarMatch] = []
@@ -1016,18 +1104,21 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.extinction_catalog.set(name)
 
     def _write_log(self, message: str) -> None:
+        message = tr(message)
         self.log.configure(state="normal")
         self.log.insert("end", message + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
     def _write_extinction(self, message: str) -> None:
+        message = tr(message)
         self.extinction_result.configure(state="normal")
         self.extinction_result.insert("end", message + "\n")
         self.extinction_result.see("end")
         self.extinction_result.configure(state="disabled")
 
     def _write_vignetting(self, message: str) -> None:
+        message = tr(message)
         self.vignetting_log.configure(state="normal")
         self.vignetting_log.insert("end", message + "\n")
         self.vignetting_log.see("end")
@@ -1051,7 +1142,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if self.extinction_preview_source is None:
             return
         dialog = tk.Toplevel(self)
-        dialog.title("Bouguerův diagram – rychlá kontrola")
+        dialog.title(tr("Bouguerův diagram – rychlá kontrola"))
         dialog.transient(self)
         photo = ImageTk.PhotoImage(self.extinction_preview_source)
         label = tk.Label(dialog, image=photo, background="white")
@@ -1074,7 +1165,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if self.vignetting_preview_source is None:
             return
         dialog = tk.Toplevel(self)
-        dialog.title("Profil vinětace – rychlá kontrola")
+        dialog.title(tr("Profil vinětace – rychlá kontrola"))
         dialog.transient(self)
         photo = ImageTk.PhotoImage(self.vignetting_preview_source)
         label = tk.Label(dialog, image=photo, background="white")
@@ -1186,7 +1277,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             dict(self.orientation_info[light]),
             latitude,
             longitude,
-            TIMEZONE_BY_LABEL[self.timezone_choice.get()],
+            self._timezone_value(),
             self.extinction_mode.get(),
             minimum_altitude,
             maximum_v,
@@ -1263,8 +1354,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             list(self.darks),
             self.output_path.get(),
             int(self.scale.get()),
-            TIMEZONE_BY_LABEL[self.timezone_choice.get()],
+            self._timezone_value(),
             vignetting_path or None,
+            self.language_code,
         )
         threading.Thread(target=self._worker, args=job, daemon=True).start()
 
@@ -1280,6 +1372,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         display_scale: int,
         source_timezone: str,
         vignetting_calibration_path: str | None,
+        language: str,
     ) -> None:
         errors: list[str] = []
         for index, light in enumerate(lights, start=1):
@@ -1296,6 +1389,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     orientation_matrix=orientation_matrices.get(light),
                     orientation_info=orientation_info.get(light),
                     vignetting_calibration_path=vignetting_calibration_path,
+                    language=language,
                 )
             except Exception as exc:
                 errors.append(f"{light.name}: {exc}")

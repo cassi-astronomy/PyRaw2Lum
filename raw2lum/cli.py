@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from .core import process_file
+from .i18n import set_language, tr
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,11 +39,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Volitelny JSON profil vinetace z kalibracni karty GUI",
     )
+    parser.add_argument(
+        "--language",
+        choices=("cs", "en"),
+        default="cs",
+        help="Jazyk vystupnich obrazku a hlaseni / output language",
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    set_language(args.language)
     failures = 0
     for light in args.lights:
         try:
@@ -56,10 +64,11 @@ def main() -> None:
                 source_timezone=args.timezone,
                 north_angle_deg=args.north_angle,
                 vignetting_calibration_path=args.vignetting_profile,
+                language=args.language,
             )
         except Exception as exc:  # CLI musi pokracovat dalsim snimkem
             failures += 1
-            print(f"CHYBA {light.name}: {exc}")
+            print(tr(f"CHYBA {light.name}: {exc}", args.language))
     if failures:
         raise SystemExit(1)
 

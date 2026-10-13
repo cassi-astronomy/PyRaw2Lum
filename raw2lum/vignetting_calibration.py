@@ -10,6 +10,8 @@ from typing import Callable, Sequence
 import numpy as np
 from PIL import Image, ImageDraw
 
+from .i18n import tr
+
 from .vignetting import VignettingCalibration
 
 
@@ -323,8 +325,10 @@ def make_vignetting_plot(
         for item, value in zip(measurements, flux / center_level):
             x, y = px(item.normalized_radius), py(float(value))
             draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=colors[channel])
-    draw.text((left, 22), "Kalibrace vinetace umele hvezdy", fill="#111111")
-    draw.text((left + 420, 22), "R / G / B: relativni propustnost", fill="#111111")
-    draw.text((left + 380, 650), "Normalizovany polomer obrazoveho kruhu", fill="#111111")
-    draw.text((15, 42), "Propustnost", fill="#111111")
+    draw.text((left, 22), tr("Kalibrace vinetace umele hvezdy"), fill="#111111")
+    draw.text((left + 420, 22), tr("R / G / B: relativni propustnost"), fill="#111111")
+    draw.text(
+        (left + 380, 650), tr("Normalizovany polomer obrazoveho kruhu"), fill="#111111"
+    )
+    draw.text((15, 42), tr("Propustnost"), fill="#111111")
     return image

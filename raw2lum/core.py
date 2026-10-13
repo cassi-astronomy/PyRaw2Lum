@@ -17,6 +17,7 @@ import numpy as np
 import rawpy
 
 from .color_analysis import SkyColorSummary, compute_color_indices, summarize_color
+from .i18n import get_language, tr
 from .palette import colorize
 from .profiles import InstrumentProfile, profile_for_camera
 from .vignetting import load_vignetting_calibration
@@ -56,6 +57,7 @@ class AnalysisResult:
     blue_green_ratio: np.ndarray
     red_green_ratio: np.ndarray
     zenith_color: SkyColorSummary
+    language: str = "cs"
     location: str | None = None
     captured_at_utc: str | None = None
     source_timezone: str = "Europe/Prague"
@@ -73,6 +75,7 @@ class AnalysisResult:
             "darks_used": [str(path) for path in self.darks_used],
             "profile": self.profile.key,
             "profile_notes": self.profile.notes,
+            "language": self.language,
             "location": self.location,
             "source_timezone": self.source_timezone,
             "captured_at_utc": self.captured_at_utc,
@@ -312,6 +315,7 @@ def analyze_raw(
     orientation_matrix: np.ndarray | None = None,
     orientation_info: dict[str, object] | None = None,
     vignetting_calibration_path: str | Path | None = None,
+    language: str | None = None,
 ) -> AnalysisResult:
     """Analyzuje jeden light RAW s automaticky vybranymi odpovidajicimi darky."""
 
@@ -484,6 +488,7 @@ def analyze_raw(
         blue_green_ratio=blue_green_ratio,
         red_green_ratio=red_green_ratio,
         zenith_color=zenith_color,
+        language=language or get_language(),
         location=location.strip() if location and location.strip() else None,
         captured_at_utc=exif_time_to_utc(light_exif.captured_at, source_timezone),
         source_timezone=source_timezone,
@@ -508,6 +513,7 @@ def process_file(
     orientation_matrix: np.ndarray | None = None,
     orientation_info: dict[str, object] | None = None,
     vignetting_calibration_path: str | Path | None = None,
+    language: str | None = None,
 ) -> AnalysisResult:
     """Analyzuje RAW a ulozi PNG, numericka pole a JSON report."""
 
@@ -523,7 +529,8 @@ def process_file(
     light_path = Path(light_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    notify(f"Analyzuji {light_path.name}")
+    language = language or get_language()
+    notify(tr(f"Analyzuji {light_path.name}", language))
     result = analyze_raw(
         light_path,
         dark_paths,
@@ -533,29 +540,33 @@ def process_file(
         orientation_matrix=orientation_matrix,
         orientation_info=orientation_info,
         vignetting_calibration_path=vignetting_calibration_path,
+        language=language,
     )
     notify(
-        "Pouzite darky: "
-        + ", ".join(f"{path.name}" for path in result.darks_used)
+        tr(
+            "Pouzite darky: "
+            + ", ".join(f"{path.name}" for path in result.darks_used),
+            language,
+        )
     )
     stem = light_path.stem
 
     msa_png_path = output_dir / f"{stem}_jas_oblohy_MSA.png"
     cd_png_path = output_dir / f"{stem}_jas_oblohy_cd_m2.png"
     render_map(result, msa_png_path, display_scale=display_scale)
-    notify(f"Ulozeno {msa_png_path.name}")
+    notify(tr(f"Ulozeno {msa_png_path.name}", language))
     render_luminance_map(result, cd_png_path, display_scale=display_scale)
-    notify(f"Ulozeno {cd_png_path.name}")
+    notify(tr(f"Ulozeno {cd_png_path.name}", language))
     color_png_path = output_dir / f"{stem}_barva_oblohy_B_podil.png"
     render_blue_fraction_map(result, color_png_path, display_scale=display_scale)
-    notify(f"Ulozeno {color_png_path.name} (experimentalni RGB index)")
+    notify(tr(f"Ulozeno {color_png_path.name} (experimentalni RGB index)", language))
     if result.north_angle_deg is not None or result.orientation_matrix is not None:
         msa_pano_path = output_dir / f"{stem}_panorama_MSA.png"
         cd_pano_path = output_dir / f"{stem}_panorama_cd_m2.png"
         render_msa_panorama(result, msa_pano_path, display_scale=display_scale)
-        notify(f"Ulozeno {msa_pano_path.name}")
+        notify(tr(f"Ulozeno {msa_pano_path.name}", language))
         render_luminance_panorama(result, cd_pano_path, display_scale=display_scale)
-        notify(f"Ulozeno {cd_pano_path.name}")
+        notify(tr(f"Ulozeno {cd_pano_path.name}", language))
     np.savez_compressed(
         output_dir / f"{stem}_numericka_data.npz",
         msa=np.asarray(result.msa, dtype=np.float32),
@@ -569,5 +580,5 @@ def process_file(
     )
     with (output_dir / f"{stem}_report.json").open("w", encoding="utf-8") as handle:
         json.dump(result.report(), handle, ensure_ascii=False, indent=2, allow_nan=False)
-    notify(f"Hotovo: {light_path.name}")
+    notify(tr(f"Hotovo: {light_path.name}", language))
     return result
