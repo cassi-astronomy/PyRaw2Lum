@@ -74,6 +74,103 @@ def orient_image_north_up(
     )
 
 
+def _smooth_calibrated_circle(
+    image: Image.Image,
+    result: AnalysisResult,
+    display_scale: int,
+) -> Image.Image:
+    """Apply an anti-aliased edge only at the calibrated image-circle limit."""
+
+    radius = result.profile.max_calibrated_radius * display_scale
+    supersampling = 2
+    mask = Image.new(
+        "L", (image.width * supersampling, image.height * supersampling), 0
+    )
+    draw = ImageDraw.Draw(mask)
+    cx = image.width * supersampling / 2.0
+    cy = image.height * supersampling / 2.0
+    rr = radius * supersampling
+    draw.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=255)
+    mask = mask.resize(image.size, Image.Resampling.LANCZOS)
+    return Image.composite(image, Image.new("RGB", image.size, "black"), mask)
+
+
+def _draw_true_horizon_circle(
+    draw: ImageDraw.ImageDraw,
+    result: AnalysisResult,
+    map_left: int,
+    map_top: int,
+    map_width: int,
+    map_height: int,
+    display_scale: int,
+) -> None:
+    """Mark altitude 0° without masking the calibrated below-horizon band."""
+
+    # A precise horizontal system is known only after the full multi-star
+    # solution. A one-direction rotation cannot determine camera tilt.
+    if result.orientation_matrix is None or not getattr(
+        result, "show_horizon_circle", True
+    ):
+        return
+    radius = math.sin(math.pi / 4.0) * _projection_radius_scale(result) * display_scale
+    calibrated = result.profile.max_calibrated_radius * display_scale
+    if not math.isfinite(radius) or radius <= 0 or radius >= calibrated:
+        return
+    cx = map_left + map_width / 2.0
+    cy = map_top + map_height / 2.0
+    bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
+    # Dark halo keeps the neutral line readable over every palette colour.
+    draw.ellipse(bounds, outline=(20, 20, 20), width=max(2, display_scale * 2))
+    draw.ellipse(bounds, outline=(225, 225, 225), width=max(1, display_scale))
+
+
+def _draw_altitude_circles(
+    draw: ImageDraw.ImageDraw,
+    result: AnalysisResult,
+    map_left: int,
+    map_top: int,
+    map_width: int,
+    map_height: int,
+    display_scale: int,
+) -> None:
+    """Draw optional 10-degree altitude rings after a full star solution."""
+
+    if result.orientation_matrix is None or not getattr(
+        result, "show_altitude_circles", False
+    ):
+        return
+    scale = _projection_radius_scale(result) * display_scale
+    calibrated = result.profile.max_calibrated_radius * display_scale
+    cx = map_left + map_width / 2.0
+    cy = map_top + map_height / 2.0
+    line_width = max(1, display_scale)
+    font = _font(max(9, 8 * display_scale))
+    for altitude_deg in range(10, 90, 10):
+        zenith_distance = math.radians(90.0 - altitude_deg)
+        radius = math.sin(zenith_distance / 2.0) * scale
+        if not math.isfinite(radius) or radius <= 0 or radius >= calibrated:
+            continue
+        bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
+        draw.ellipse(bounds, outline=(175, 175, 175), width=line_width)
+        label = f"{altitude_deg}°"
+        box = draw.textbbox((0, 0), label, font=font)
+        diagonal = radius / math.sqrt(2.0)
+        label_x = cx + diagonal - (box[2] - box[0]) - 2 * display_scale
+        label_y = cy - diagonal - (box[3] - box[1]) / 2.0
+        draw.text(
+            (label_x + display_scale, label_y + display_scale),
+            label,
+            font=font,
+            fill=(20, 20, 20),
+        )
+        draw.text((label_x, label_y), label, font=font, fill=(225, 225, 225))
+
+    # Altitude 90° is a point, not a circle.
+    arm = max(3, 3 * display_scale)
+    draw.line((cx - arm, cy, cx + arm, cy), fill=(225, 225, 225), width=line_width)
+    draw.line((cx, cy - arm, cx, cy + arm), fill=(225, 225, 225), width=line_width)
+
+
 def _draw_compass_on_round_map(
     draw: ImageDraw.ImageDraw,
     map_left: int,
@@ -128,6 +225,7 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.NEAREST,
         )
+    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -142,6 +240,24 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
         _draw_compass_on_round_map(
             draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
+    _draw_altitude_circles(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
+    _draw_true_horizon_circle(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
 
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
@@ -215,6 +331,7 @@ def render_luminance_map(
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.NEAREST,
         )
+    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -229,6 +346,24 @@ def render_luminance_map(
         _draw_compass_on_round_map(
             draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
+    _draw_altitude_circles(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
+    _draw_true_horizon_circle(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
     tick_font = _font(max(17, int(width * 0.0075)))
@@ -391,6 +526,7 @@ def render_blue_fraction_map(
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.BILINEAR,
         )
+    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -405,6 +541,24 @@ def render_blue_fraction_map(
         _draw_compass_on_round_map(
             draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
+    _draw_altitude_circles(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
+    _draw_true_horizon_circle(
+        draw,
+        result,
+        map_left,
+        map_top,
+        map_image.width,
+        map_image.height,
+        display_scale,
+    )
 
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))

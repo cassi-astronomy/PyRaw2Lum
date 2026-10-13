@@ -102,7 +102,8 @@ se vytvářejí také nadpisy, světové strany, popisy legend a diagnostické g
    pořízené různými expozičními časy.
 4. Vyberte časovou zónu, ve které byly nastavené hodiny fotoaparátu.
 5. Volitelně nastavte každému lightu orientaci tlačítkem **Orientace…**.
-6. Zvolte výstupní složku a velikost PNG.
+6. Zvolte výstupní složku a velikost PNG. Podle potřeby zapněte matematický
+   horizont a/nebo výškové kružnice po 10° v kruhových mapách.
 7. Stiskněte **Spustit zpracování**.
 
 Lighty i darky lze přetahovat přímo z Průzkumníku Windows. Cesty obsahující
@@ -218,6 +219,15 @@ Při hvězdné orientaci se mapa geometricky převzorkuje do skutečného zenitu
 Panorama má sever uprostřed a pořadí zleva doprava **J – Z – S – V – J**.
 Zenit je nahoře. Bílá čára označuje matematický horizont a pod ní zůstává úzký
 pás kalibrovaného obrazu, takže se neodříznou blízké objekty a světla.
+
+Stejné pravidlo používají kruhové mapy MSA, luminance i barvy. Volitelná tenká
+neutrálně šedá kružnice s tmavým lemem označuje skutečnou výšku 0°. Nejde o
+masku: kalibrovaný pás pod kružnicí zůstává zobrazený. Druhá volitelná vrstva
+přidá kružnice ve výškách 10°, 20°, …, 80° a značku zenitu v 90°. Obě vrstvy
+se počítají pouze po úplném řešení z více hvězd, protože jediný světový směr
+nedokáže určit náklon fotoaparátu. Hladký vnější okraj je hranice kalibrovaného
+obrazového kruhu objektivu, nikoli obzor. Horizont je ve výchozím nastavení zapnutý,
+výšková síť vypnutá.
 
 ## Experimentální barva oblohy z RAW RGB
 
@@ -469,6 +479,8 @@ Volby:
 - `--language cs|en` – jazyk popisů ve vytvořených obrázcích a hlášení.
 - `--vignetting-profile profil.json` – ručně určená vinětace pro CLI,
 - `--photometric-profile profil.json` – hvězdná absolutní kalibrace pro CLI.
+- `--no-horizon-circle` – skryje matematický horizont v kruhových mapách,
+- `--altitude-circles` – přidá výškové kružnice 10°–80° a značku zenitu.
 
 Astrometrické označování hvězd je dostupné v GUI.
 

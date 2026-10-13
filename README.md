@@ -101,7 +101,8 @@ scientific units and data filenames remain unchanged.
    exposure times.
 4. Select the time zone in which the camera clock was set.
 5. Optionally set the orientation of each light with **Orientation…**.
-6. Select an output folder and PNG size.
+6. Select an output folder and PNG size. If desired, enable the mathematical
+   horizon and/or 10° altitude circles for the round maps.
 7. Press **Start processing**.
 
 Lights and darks can be dragged directly from Windows File Explorer. Paths
@@ -183,6 +184,15 @@ is up, east right, south down, and west left. The panorama has north at the
 centre and runs **S – W – N – E – S** from left to right. Its white line marks
 the mathematical horizon; a narrow calibrated strip remains below it so nearby
 objects and lights are not cut off.
+
+The circular MSA, luminance, and colour maps follow the same rule. An optional
+thin neutral-grey line with a dark halo marks true altitude 0°. It is not a
+mask: the calibrated strip below the line remains visible. A second optional
+overlay adds circles at altitudes 10°, 20°, …, 80° and marks the 90° zenith.
+Both overlays are calculated only after a full multi-star solution because a
+single compass direction cannot determine camera tilt. The outer smooth edge
+is the limit of the calibrated lens image circle, not the horizon. The horizon
+overlay is enabled by default; the altitude grid is disabled by default.
 
 ## Experimental RAW sky colour
 
@@ -399,6 +409,8 @@ Options include:
 - `--language cs|en` – language of rendered labels and messages,
 - `--vignetting-profile profile.json` – explicit CLI vignetting profile,
 - `--photometric-profile profile.json` – explicit stellar absolute calibration.
+- `--no-horizon-circle` – hide the mathematical horizon in round maps,
+- `--altitude-circles` – add 10°–80° altitude circles and the zenith marker.
 
 Interactive astrometric star selection is available in the GUI.
 

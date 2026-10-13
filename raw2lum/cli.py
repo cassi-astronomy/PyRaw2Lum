@@ -50,6 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="cs",
         help="Jazyk vystupnich obrazku a hlaseni / output language",
     )
+    parser.add_argument(
+        "--no-horizon-circle",
+        action="store_true",
+        help="Nevykreslovat matematicky horizont v kruhovych mapach",
+    )
+    parser.add_argument(
+        "--altitude-circles",
+        action="store_true",
+        help="Vykreslit vyskové kruznice po 10 stupnich (vyzaduje hvezdnou astrometrii)",
+    )
     return parser
 
 
@@ -71,6 +81,8 @@ def main() -> None:
                 vignetting_calibration_path=args.vignetting_profile,
                 photometric_calibration_path=args.photometric_profile,
                 language=args.language,
+                show_horizon_circle=not args.no_horizon_circle,
+                show_altitude_circles=args.altitude_circles,
             )
         except Exception as exc:  # CLI musi pokracovat dalsim snimkem
             failures += 1

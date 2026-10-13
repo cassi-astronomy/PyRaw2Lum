@@ -116,6 +116,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.output_path = tk.StringVar(value=str(Path.cwd() / "vystup"))
         self.timezone_choice = tk.StringVar(value=tr(TIMEZONE_CHOICES[0][0]))
         self.scale = tk.IntVar(value=2)
+        self.show_horizon_circle = tk.BooleanVar(value=True)
+        self.show_altitude_circles = tk.BooleanVar(value=False)
         self.extinction_light = tk.StringVar()
         self.extinction_catalog = tk.StringVar(value=str(bundled_gaia_catalog_path()))
         self.extinction_mode = tk.StringVar(value="tracker")
@@ -276,6 +278,25 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ttk.Radiobutton(options, text="1× (nativní mapa)", variable=self.scale, value=1).pack(side="left", padx=8)
         ttk.Radiobutton(options, text="2×", variable=self.scale, value=2).pack(side="left", padx=8)
         ttk.Radiobutton(options, text="3×", variable=self.scale, value=3).pack(side="left", padx=8)
+
+        overlays = ttk.Frame(root)
+        overlays.pack(fill="x", pady=(0, 6))
+        ttk.Label(overlays, text="Kružnice v kruhových mapách:").pack(side="left")
+        ttk.Checkbutton(
+            overlays,
+            text="matematický horizont",
+            variable=self.show_horizon_circle,
+        ).pack(side="left", padx=(8, 4))
+        ttk.Checkbutton(
+            overlays,
+            text="výšky po 10°",
+            variable=self.show_altitude_circles,
+        ).pack(side="left", padx=4)
+        ttk.Label(
+            overlays,
+            text="(jen po hvězdné astrometrii)",
+            foreground="#666666",
+        ).pack(side="left", padx=(6, 0))
 
         action = ttk.Frame(root)
         action.pack(fill="x", pady=(8, 8))
@@ -1813,6 +1834,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             int(self.scale.get()),
             self._timezone_value(),
             self.language_code,
+            bool(self.show_horizon_circle.get()),
+            bool(self.show_altitude_circles.get()),
         )
         threading.Thread(target=self._worker, args=job, daemon=True).start()
 
@@ -1828,6 +1851,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         display_scale: int,
         source_timezone: str,
         language: str,
+        show_horizon_circle: bool,
+        show_altitude_circles: bool,
     ) -> None:
         errors: list[str] = []
         for index, light in enumerate(lights, start=1):
@@ -1856,6 +1881,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     vignetting_calibration_path=vignetting_calibration_path,
                     photometric_calibration_path=photometric_calibration_path,
                     language=language,
+                    show_horizon_circle=show_horizon_circle,
+                    show_altitude_circles=show_altitude_circles,
                 )
             except Exception as exc:
                 errors.append(f"{light.name}: {exc}")

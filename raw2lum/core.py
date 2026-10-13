@@ -68,6 +68,8 @@ class AnalysisResult:
     orientation_info: dict[str, object] | None = None
     vignetting_calibration: str | None = None
     photometric_calibration: str | None = None
+    show_horizon_circle: bool = True
+    show_altitude_circles: bool = False
 
     def report(self) -> dict[str, object]:
         valid = np.isfinite(self.luminance_cd_m2) & (self.luminance_cd_m2 > 0)
@@ -91,6 +93,10 @@ class AnalysisResult:
             "orientation": self.orientation_info,
             "vignetting_calibration": self.vignetting_calibration,
             "photometric_calibration": self.photometric_calibration,
+            "map_overlays": {
+                "horizon_circle": self.show_horizon_circle,
+                "altitude_circles_10_deg": self.show_altitude_circles,
+            },
             "calibration_divisor_used": self.calibration_divisor_used,
             "exif": asdict(self.exif),
             "zenith": {
@@ -322,6 +328,8 @@ def analyze_raw(
     vignetting_calibration_path: str | Path | None = None,
     photometric_calibration_path: str | Path | None = None,
     language: str | None = None,
+    show_horizon_circle: bool = True,
+    show_altitude_circles: bool = False,
 ) -> AnalysisResult:
     """Analyzuje jeden light RAW s automaticky vybranymi odpovidajicimi darky."""
 
@@ -515,6 +523,8 @@ def analyze_raw(
             if photometric_calibration_path
             else None
         ),
+        show_horizon_circle=show_horizon_circle,
+        show_altitude_circles=show_altitude_circles,
     )
 
 
@@ -532,6 +542,8 @@ def process_file(
     vignetting_calibration_path: str | Path | None = None,
     photometric_calibration_path: str | Path | None = None,
     language: str | None = None,
+    show_horizon_circle: bool = True,
+    show_altitude_circles: bool = False,
 ) -> AnalysisResult:
     """Analyzuje RAW a ulozi PNG, numericka pole a JSON report."""
 
@@ -560,6 +572,8 @@ def process_file(
         vignetting_calibration_path=vignetting_calibration_path,
         photometric_calibration_path=photometric_calibration_path,
         language=language,
+        show_horizon_circle=show_horizon_circle,
+        show_altitude_circles=show_altitude_circles,
     )
     notify(
         tr(
