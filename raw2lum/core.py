@@ -19,6 +19,7 @@ import rawpy
 from .color_analysis import SkyColorSummary, compute_color_indices, summarize_color
 from .i18n import get_language, tr
 from .palette import colorize
+from .photometric_calibration import load_star_calibration
 from .profiles import InstrumentProfile, profile_for_camera
 from .vignetting import load_vignetting_calibration
 
@@ -57,6 +58,7 @@ class AnalysisResult:
     blue_green_ratio: np.ndarray
     red_green_ratio: np.ndarray
     zenith_color: SkyColorSummary
+    calibration_divisor_used: float
     language: str = "cs"
     location: str | None = None
     captured_at_utc: str | None = None
@@ -65,6 +67,7 @@ class AnalysisResult:
     orientation_matrix: np.ndarray | None = None
     orientation_info: dict[str, object] | None = None
     vignetting_calibration: str | None = None
+    photometric_calibration: str | None = None
 
     def report(self) -> dict[str, object]:
         valid = np.isfinite(self.luminance_cd_m2) & (self.luminance_cd_m2 > 0)
@@ -87,6 +90,8 @@ class AnalysisResult:
             ),
             "orientation": self.orientation_info,
             "vignetting_calibration": self.vignetting_calibration,
+            "photometric_calibration": self.photometric_calibration,
+            "calibration_divisor_used": self.calibration_divisor_used,
             "exif": asdict(self.exif),
             "zenith": {
                 "mag_per_arcsec2": self.zenith_msa,
@@ -315,6 +320,7 @@ def analyze_raw(
     orientation_matrix: np.ndarray | None = None,
     orientation_info: dict[str, object] | None = None,
     vignetting_calibration_path: str | Path | None = None,
+    photometric_calibration_path: str | Path | None = None,
     language: str | None = None,
 ) -> AnalysisResult:
     """Analyzuje jeden light RAW s automaticky vybranymi odpovidajicimi darky."""
@@ -390,11 +396,16 @@ def analyze_raw(
         relative_red = rr * red[0]
         relative_green = gg * (green[0] + green[1]) / 2.0
         relative_blue = bb * blue[0]
+    calibration_divisor = profile.calibration_divisor
+    if photometric_calibration_path:
+        star_calibration = load_star_calibration(photometric_calibration_path)
+        star_calibration.validate_for(profile, light_exif)
+        calibration_divisor = star_calibration.calibration_divisor
     exposure_factor = exposure_normalization_factor(
         light_exif.iso,
         light_exif.exposure_s,
         light_exif.aperture,
-        profile.calibration_divisor,
+        calibration_divisor,
     )
     relative_red = relative_red.astype(np.float64) / exposure_factor
     relative_green = relative_green.astype(np.float64) / exposure_factor
@@ -488,6 +499,7 @@ def analyze_raw(
         blue_green_ratio=blue_green_ratio,
         red_green_ratio=red_green_ratio,
         zenith_color=zenith_color,
+        calibration_divisor_used=calibration_divisor,
         language=language or get_language(),
         location=location.strip() if location and location.strip() else None,
         captured_at_utc=exif_time_to_utc(light_exif.captured_at, source_timezone),
@@ -497,6 +509,11 @@ def analyze_raw(
         orientation_info=orientation_info,
         vignetting_calibration=(
             str(Path(vignetting_calibration_path)) if vignetting_calibration_path else None
+        ),
+        photometric_calibration=(
+            str(Path(photometric_calibration_path))
+            if photometric_calibration_path
+            else None
         ),
     )
 
@@ -513,6 +530,7 @@ def process_file(
     orientation_matrix: np.ndarray | None = None,
     orientation_info: dict[str, object] | None = None,
     vignetting_calibration_path: str | Path | None = None,
+    photometric_calibration_path: str | Path | None = None,
     language: str | None = None,
 ) -> AnalysisResult:
     """Analyzuje RAW a ulozi PNG, numericka pole a JSON report."""
@@ -540,6 +558,7 @@ def process_file(
         orientation_matrix=orientation_matrix,
         orientation_info=orientation_info,
         vignetting_calibration_path=vignetting_calibration_path,
+        photometric_calibration_path=photometric_calibration_path,
         language=language,
     )
     notify(

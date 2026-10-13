@@ -22,6 +22,12 @@ from .i18n import tr
 from .core import AnalysisResult, analyze_raw
 
 
+def bundled_gaia_catalog_path() -> Path:
+    """Return the small all-sky Gaia GSPC subset shipped with PyRaw2Lum."""
+
+    return Path(__file__).resolve().parent / "data" / "gaia_gspc_v3_7.csv"
+
+
 @dataclass(frozen=True)
 class CatalogStar:
     source_id: str
@@ -72,6 +78,7 @@ class ExtinctionResult:
     airmass_max: float
     mid_exposure_utc: str
     measurements: tuple[StarPhotometry, ...]
+    calibration_divisor_used: float = 1.0
 
     def report(self) -> dict[str, object]:
         result = asdict(self)
@@ -438,6 +445,7 @@ def measure_extinction(
     maximum_v_mag: float = 7.5,
     aperture_radius_px: float = 2.5,
     vignetting_calibration_path: str | Path | None = None,
+    photometric_calibration_path: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> ExtinctionResult:
     """Zmeri globalni extinkcni koeficient z jednoho orientovaneho snimku."""
@@ -452,6 +460,7 @@ def measure_extinction(
         orientation_matrix=orientation_matrix,
         orientation_info=orientation_info,
         vignetting_calibration_path=vignetting_calibration_path,
+        photometric_calibration_path=photometric_calibration_path,
     )
     if result.captured_at_utc is None:
         raise ValueError("RAW nema pouzitelny cas expozice.")
@@ -624,6 +633,7 @@ def measure_extinction(
         airmass_min=min(item.airmass for item in used),
         airmass_max=max(item.airmass for item in used),
         mid_exposure_utc=mid_utc,
+        calibration_divisor_used=result.calibration_divisor_used,
         measurements=final_measurements,
     )
 

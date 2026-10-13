@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyraw2lum"
-version = "0.3.0"
+version = "0.4.0"
 description = "PyRaw2Lum - mereni jasu oblohy z celooblohovych DSLR RAW snimku"
 readme = "README.md"
 authors = [{name = "Martin Mašek"}]
@@ -39,3 +39,6 @@ Issues = "https://github.com/cassi-astronomy/PyRaw2Lum/issues"
 
 [tool.setuptools.packages.find]
 include = ["raw2lum*"]
+
+[tool.setuptools.package-data]
+raw2lum = ["data/*.csv", "data/*.md"]

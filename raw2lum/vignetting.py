@@ -19,6 +19,7 @@ class VignettingCalibration:
     max_radius_px: float
     coefficients: dict[str, tuple[float, ...]]
     fit_rms_percent: dict[str, float]
+    lens_model_exif: str | None = None
     source_files: tuple[str, ...] = ()
     measurements: tuple[dict[str, object], ...] = ()
     schema_version: int = 1
@@ -67,6 +68,7 @@ class VignettingCalibration:
             "profile_key": self.profile_key,
             "camera_model": self.camera_model,
             "lens_name": self.lens_name,
+            "lens_model_exif": self.lens_model_exif,
             "aperture": self.aperture,
             "max_radius_px": self.max_radius_px,
             "coefficients": {
@@ -98,6 +100,11 @@ def load_vignetting_calibration(path: str | Path) -> VignettingCalibration:
             profile_key=str(data["profile_key"]),
             camera_model=str(data["camera_model"]),
             lens_name=str(data["lens_name"]),
+            lens_model_exif=(
+                str(data["lens_model_exif"])
+                if data.get("lens_model_exif") not in (None, "")
+                else None
+            ),
             aperture=float(data["aperture"]),
             max_radius_px=float(data["max_radius_px"]),
             coefficients={

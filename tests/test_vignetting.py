@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -13,9 +14,33 @@ from raw2lum.vignetting import (
     save_vignetting_calibration,
 )
 from raw2lum.vignetting_calibration import _robust_radial_fit, measure_artificial_source
+from raw2lum.vignetting_registry import VignettingProfileRegistry
 
 
 class VignettingTests(unittest.TestCase):
+    def test_registry_stores_matches_and_removes_profile(self) -> None:
+        calibration = VignettingCalibration(
+            profile_key=CANON_600D_SIGMA_45.key,
+            camera_model=CANON_600D_SIGMA_45.camera_model,
+            lens_name=CANON_600D_SIGMA_45.lens_name,
+            aperture=3.5,
+            max_radius_px=CANON_600D_SIGMA_45.max_calibrated_radius,
+            coefficients={"R": (-0.2,), "G": (-0.25,), "B": (-0.3,)},
+            fit_rms_percent={"R": 1.0, "G": 1.0, "B": 1.0},
+            lens_model_exif="Sigma 4.5mm F2.8 EX DC HSM Circular Fisheye",
+        )
+        exif = SimpleNamespace(
+            camera_model=CANON_600D_SIGMA_45.camera_model,
+            lens_model="Sigma 4.5mm F2.8 EX DC HSM Circular Fisheye",
+            aperture=3.5,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            registry = VignettingProfileRegistry(directory)
+            path = registry.store(calibration)
+            self.assertEqual(registry.match(exif, CANON_600D_SIGMA_45), path)
+            registry.remove(path)
+            self.assertIsNone(registry.match(exif, CANON_600D_SIGMA_45))
+
     def test_artificial_source_is_found_and_measured_in_rgb(self) -> None:
         rng = np.random.default_rng(123)
         shape = (200, 200)

@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Volitelny JSON profil vinetace z kalibracni karty GUI",
     )
     parser.add_argument(
+        "--photometric-profile",
+        type=Path,
+        help="Volitelny JSON profil hvezdne absolutni fotometricke kalibrace",
+    )
+    parser.add_argument(
         "--language",
         choices=("cs", "en"),
         default="cs",
@@ -64,6 +69,7 @@ def main() -> None:
                 source_timezone=args.timezone,
                 north_angle_deg=args.north_angle,
                 vignetting_calibration_path=args.vignetting_profile,
+                photometric_calibration_path=args.photometric_profile,
                 language=args.language,
             )
         except Exception as exc:  # CLI musi pokracovat dalsim snimkem

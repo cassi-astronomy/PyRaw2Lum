@@ -279,6 +279,7 @@ def calibrate_vignetting(
         max_radius_px=profile.max_calibrated_radius,
         coefficients=coefficients,
         fit_rms_percent=rms,
+        lens_model_exif=first_exif.lens_model,
         source_files=tuple(str(path) for path in images),
         measurements=tuple(item.report() for item in measurements),
     )

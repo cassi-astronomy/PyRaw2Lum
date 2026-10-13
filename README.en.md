@@ -58,11 +58,16 @@ plausible-looking but physically invalid result.
   many catalogue stars, for tracked or fixed-tripod images,
 - automatic radial R/G/B vignetting calibration from a series of artificial
   star images, saved as a reusable JSON profile,
+- a clean full-screen monitor calibration target,
+- persistent management and automatic camera/lens/aperture matching of several
+  vignetting profiles,
+- experimental absolute stellar calibration from a Bouguer fit,
+- automatic WCS solving for 30 mm, 50 mm, and longer lenses through ASTAP,
 - exact numerical arrays and a detailed JSON report.
 
-Normal processing works offline. A small bright-star catalogue for manual
-orientation is bundled with the program. Experimental extinction measurement
-requires a one-time Gaia GSPC CSV export.
+Normal processing works offline. Both the small bright-star catalogue for
+manual orientation and a compact all-sky selection of 11,266 Gaia GSPC stars
+with `3.1 <= V <= 7.0` are bundled with the program.
 
 ## Installation and startup
 
@@ -218,26 +223,31 @@ colour term is fitted only when enough stars have both B and V values.
 Saturated stars, low S/N, catalogue neighbours, duplicate detections, and fit
 outliers are rejected automatically.
 
-### Preparing a Gaia catalogue
+### Bundled Gaia catalogue
 
-Export a CSV from the Gaia archive with this ADQL query; `V = 8` is sufficient
-for initial experiments:
+The bundled catalogue contains 11,266 stars to `V = 7`. The default measuring
+limit is `V = 6`. An average 50 mm APS-C field (about 25 × 17°) contains roughly
+33 such stars by all-sky average. Away from the Milky Way (`|b| ≥ 30°`), the
+catalogue averages about 23 stars to `V = 6`, or 78 to `V = 7`, before rejecting
+saturation, neighbours, and weak detections.
+
+The catalogue was obtained from the official Gaia archive using:
 
 ```sql
-SELECT g.source_id, g.ra, g.dec,
-       p.b_jkc_mag, p.v_jkc_mag,
-       p.b_jkc_flag, p.v_jkc_flag
+SELECT g.source_id, g.ra, g.dec, g.pmra, g.pmdec,
+       p.b_jkc_mag, p.v_jkc_mag
 FROM gaiadr3.gaia_source AS g
-JOIN gaiadr3.synthetic_photometry_gspc AS p
-  ON g.source_id = p.source_id
-WHERE p.v_jkc_mag BETWEEN 3.0 AND 8.0
-  AND p.v_jkc_flag = 1
-  AND p.b_jkc_flag = 1
+JOIN gaiadr3.synthetic_photometry_gspc AS p USING (source_id)
+WHERE p.v_jkc_mag BETWEEN 3.1 AND 7.0
+  AND ABS(p.c_star) < 0.1
+  AND p.v_jkc_flux / p.v_jkc_flux_error > 50
+  AND p.b_jkc_flux / p.b_jkc_flux_error > 50
 ```
 
-`ra`, `dec`, and `v_jkc_mag` are required. `source_id`, `b_jkc_mag`, and the
-quality flags are recommended. Gaia GSPC is incomplete for the brightest stars
-below roughly 3 mag.
+These bright objects have GSPC standardisation validation flag 0. Gaia publishes
+their synthetic magnitudes, but they lie outside the fully validated GSPC
+range, so the feature remains explicitly experimental. A custom CSV can still
+be selected; `ra`, `dec`, and `v_jkc_mag` are required.
 
 ### Measuring extinction
 
@@ -248,7 +258,7 @@ below roughly 3 mag.
 3. Choose **Tracker** for point-like stars or **Fixed tripod**. Fixed-tripod
    mode computes an individual trail length and direction from declination and
    exposure time for every star.
-4. For a first run, keep the 20° minimum altitude, `V = 7.5` limit, and
+4. For a first run, keep the 20° minimum altitude, `V = 6.0` limit, and
    2.5-pixel aperture.
 
 The Bouguer plot is shown on the tab immediately when the fit finishes, before
@@ -270,6 +280,10 @@ an otherwise black monitor in a dark room. Keep the square fixed and rotate
 the camera about the lens entrance pupil so the source appears across the
 image circle.
 
+**Open full screen** displays a single white square or circle of adjustable
+size on a clean black field. There is no other text in that window, and any key
+closes it, so it can be photographed directly.
+
 - use at least 10, preferably 15–30 RAW images,
 - keep camera, lens, aperture, and ISO unchanged,
 - include positions near the centre (`r < 0.18`) and edge (`r > 0.72`),
@@ -288,11 +302,50 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 
 Transmission is normalized to `T(0) = 1`. The resulting JSON profile and PNG
 control plot show the measured points and R/G/B curves. The GUI automatically
-selects a successful profile for subsequent processing.
+adds a successful profile to its persistent manager. Profiles can be added and
+removed on the **Sky brightness** tab, and each light automatically receives a
+matching camera, lens, and aperture profile.
 
 The calibrator still needs a basic PyRaw2Lum camera/lens profile containing the
 crop, centre, and image-circle radius. A future Canon 6D Mark I + 8 mm fisheye
 setup therefore first needs this geometry added from a sample RAW.
+
+## Experimental stellar instrument calibration
+
+**Instrument calibration – stars** derives an absolute conversion coefficient
+from the most recent successful extinction measurement. The Bouguer fit
+extrapolates stellar brightness above the atmosphere. Its zero point is then
+compared with the illuminance of a `V = 0` star and the solid angle of one image
+sample. The result is stored separately from vignetting and selected
+automatically for the same camera, lens, and aperture.
+
+Use a cloud-free calibration image with many unsaturated stars, weak background
+gradients, and a broad air-mass range. This experimental calibration
+approximates Johnson V through the camera RGB response; it does not replace a
+laboratory measurement of the V(λ) spectral response.
+
+### Automatic ASTAP astrometry for longer lenses
+
+The same tab can run the external [ASTAP](https://www.hnsky.org/astap.htm) for
+normal 30 mm, 50 mm, and longer lenses. PyRaw2Lum temporarily develops the RAW
+to TIFF, asks ASTAP for a WCS solution, and writes `*_astap_wcs.json` containing
+the field centre, dimensions, pixel scale, and complete WCS header. Field
+height remains editable; for known Canon 600D, R6m2, and 6D bodies it is
+estimated from EXIF focal length and sensor height when the RAW is selected.
+
+ASTAP and a suitable star database must be installed separately. For fields
+above 6° and up to 20° high (for example 50 mm + APS-C at about 17°), ASTAP
+recommends **G05**; for wider fields it recommends **W08**. Its documentation
+also permits the D-series databases from 0.6° upwards, so PyRaw2Lum accepts
+them, although G05 is smaller and more efficient for a wide field. PyRaw2Lum
+detects the installation and database families but does not download large
+databases automatically.
+
+Fisheyes continue to use PyRaw2Lum's manual astrometric solution because their
+strong projection is outside a normal WCS/ASTAP solve. The current ASTAP
+integration solves and records longer-lens geometry. Full rectangular
+brightness and extinction processing through that WCS is the next step; the
+current brightness mapper still requires a known instrument geometry profile.
 
 ## Output files
 
@@ -332,7 +385,9 @@ Options include:
 - `--location "Jizerka"` – one location for the supplied batch,
 - `--timezone Europe/Prague` – time zone used by the EXIF clock,
 - `--north-angle` – advanced manual north image angle,
-- `--language cs|en` – language of rendered labels and messages.
+- `--language cs|en` – language of rendered labels and messages,
+- `--vignetting-profile profile.json` – explicit CLI vignetting profile,
+- `--photometric-profile profile.json` – explicit stellar absolute calibration.
 
 Interactive astrometric star selection is available in the GUI.
 

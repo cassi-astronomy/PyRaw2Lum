@@ -58,11 +58,17 @@ věrohodně vypadajícího, ale fyzikálně nesprávného výsledku.
   katalogových hvězd, včetně snímků z trackeru i pevného stativu,
 - automaticky zkalibrovat radiální vinětaci R, G a B ze série snímků jedné
   umělé hvězdy a uložit opakovaně použitelný JSON profil,
+- zobrazit čistý celoobrazovkový kalibrační terč na monitoru,
+- spravovat více profilů vinětace a automaticky je volit podle fotoaparátu,
+  objektivu a clony,
+- experimentálně vytvořit absolutní profil sestavy z hvězdné fotometrie a
+  Bouguerova fitu,
+- automaticky vyřešit WCS snímku z 30mm, 50mm či delšího objektivu přes ASTAP,
 - uložit přesná numerická pole a podrobný JSON report.
 
-Zpracování funguje offline. Malý katalog jasných hvězd pro ruční orientaci je
-součástí programu; pro experimentální extinkci je nutné jednou dodat CSV export
-Gaia GSPC.
+Zpracování funguje offline. Malý katalog jasných hvězd pro ruční orientaci i
+kompaktní celooblohový výběr 11 266 hvězd Gaia GSPC s `3,1 ≤ V ≤ 7,0` jsou
+součástí programu.
 
 ## Instalace a spuštění
 
@@ -260,27 +266,31 @@ m_inst − V = ZP + k · X + C · (B−V)
 automaticky odmítá saturované hvězdy, malé S/N, katalogové sousedy, duplicitní
 detekce a odlehlé body fitu.
 
-### Příprava katalogu Gaia
+### Vestavěný katalog Gaia
 
-V archivu Gaia vytvořte CSV export následujícího ADQL dotazu. Rozsah do
-`V = 8` je pro první pokusy dostatečný:
+Program automaticky používá přibalený katalog 11 266 hvězd do `V = 7`. Výchozí
+mez měření je `V = 6`; v průměrném poli 50mm objektivu na APS-C (přibližně
+25 × 17°) odpovídá celooblohová hustota asi 33 hvězdám. Mimo Mléčnou dráhu
+(`|b| ≥ 30°`) jich katalog dává v průměru přibližně 23 do `V = 6`, nebo 78 do
+`V = 7`, ještě před odmítnutím saturace, sousedů a slabých detekcí.
+
+Katalog byl připraven z oficiálního Gaia archivu tímto ADQL dotazem:
 
 ```sql
-SELECT g.source_id, g.ra, g.dec,
-       p.b_jkc_mag, p.v_jkc_mag,
-       p.b_jkc_flag, p.v_jkc_flag
+SELECT g.source_id, g.ra, g.dec, g.pmra, g.pmdec,
+       p.b_jkc_mag, p.v_jkc_mag
 FROM gaiadr3.gaia_source AS g
-JOIN gaiadr3.synthetic_photometry_gspc AS p
-  ON g.source_id = p.source_id
-WHERE p.v_jkc_mag BETWEEN 3.0 AND 8.0
-  AND p.v_jkc_flag = 1
-  AND p.b_jkc_flag = 1
+JOIN gaiadr3.synthetic_photometry_gspc AS p USING (source_id)
+WHERE p.v_jkc_mag BETWEEN 3.1 AND 7.0
+  AND ABS(p.c_star) < 0.1
+  AND p.v_jkc_flux / p.v_jkc_flux_error > 50
+  AND p.b_jkc_flux / p.b_jkc_flux_error > 50
 ```
 
-Program potřebuje sloupce `ra`, `dec` a `v_jkc_mag`; `source_id`,
-`b_jkc_mag` a příznaky kvality jsou doporučené. Jasné hvězdy přibližně pod
-3 mag nejsou v Gaia GSPC úplné, proto se tato první verze nesnaží stavět fit
-jen na nejjasnějších pojmenovaných hvězdách.
+Velmi jasné objekty v tomto rozsahu mají v GSPC příznak standardizační validace
+0. Gaia jejich syntetické magnitudy publikuje, ale leží mimo plně validovaný
+rozsah GSPC. Proto je měření nadále označeno jako experimentální. Vlastní CSV
+lze stále vybrat ručně; program potřebuje `ra`, `dec` a `v_jkc_mag`.
 
 ### Postup měření
 
@@ -292,7 +302,7 @@ jen na nejjasnějších pojmenovaných hvězdách.
    stativu program každé hvězdě samostatně spočítá délku i směr stopy podle
    deklinace a času expozice; Polárka proto dostane téměř bodovou aperturu a
    hvězdy u rovníku delší.
-4. Pro první pokus ponechte minimální výšku 20°, mez `V = 7,5` a aperturu
+4. Pro první pokus ponechte minimální výšku 20°, mez `V = 6,0` a aperturu
    2,5 pixelu. Potom spusťte měření.
 
 Jakmile je fit hotový, Bouguerův graf se zobrazí přímo na kartě ještě před
@@ -320,6 +330,10 @@ bílý čtvereček uprostřed monitoru v temné místnosti. Čtvereček zůstáv
 na stejném místě a fotoaparát se natáčí kolem vstupní pupily objektivu tak, aby
 se zdroj zobrazil v různých částech obrazového kruhu.
 
+Tlačítko **Otevřít přes celou obrazovku** zobrazí na černé ploše jediný bílý
+čtverec nebo kruh nastavitelné velikosti. Okno neobsahuje žádný další text a
+zavře se libovolnou klávesou, takže jej lze přímo fotografovat.
+
 ### Pořízení kalibrační série
 
 - použijte nejméně 10, lépe 15–30 RAW snímků,
@@ -340,14 +354,50 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 
 Propustnost je normalizována na `T(0) = 1`. Výsledkem je JSON profil a kontrolní
 PNG graf naměřených bodů a křivek R/G/B. Po úspěšné kalibraci GUI nový JSON
-automaticky nastaví do pole **Vlastní vinětace** na první kartě. Při běžném
-zpracování se potom každý Bayerův kanál opraví samostatně ještě před jejich
-složením do fotopické luminance.
+automaticky přidá také do trvalého správce. Na kartě **Jas oblohy** lze profily
+přidávat a odebírat; pro každý light se automaticky vybere shoda modelu
+fotoaparátu, objektivu a clony. Při běžném zpracování se každý Bayerův kanál
+opraví samostatně ještě před složením do fotopické luminance.
 
 Kalibrátor nyní vyžaduje, aby pro daný fotoaparát už existoval základní profil
 PyRaw2Lum s výřezem, středem a poloměrem obrazového kruhu. Pro budoucí Canon 6D
 Mark I + 8mm rybí oko bude proto nejprve potřeba z ukázkového RAWu doplnit
 základní geometrii sestavy; vlastní vinětaci potom změří tato karta.
+
+## Experimentální kalibrace sestavy na hvězdách
+
+Karta **Kalibrace sestavy – hvězdy** vytvoří absolutní převodní koeficient z
+posledního úspěšného měření extinkce. Bouguerův fit extrapoluje jas hvězd nad
+atmosféru. Nulový bod se pak porovná s osvětlením hvězdy `V = 0` a s
+prostorovým úhlem jednoho obrazového vzorku. Profil se uloží odděleně od
+vinětace a pro shodný fotoaparát, objektiv a clonu se používá automaticky.
+
+Kalibrační snímek musí být bez oblačnosti a výrazných gradientů, mít dostatek
+nesaturovaných hvězd a široký rozsah vzdušné hmoty. Jde o experimentální
+absolutní kalibraci aproximující Johnsonovo V pomocí RGB odezvy fotoaparátu;
+nenahrazuje laboratorní měření spektrální odezvy V(λ).
+
+### Automatická astrometrie ASTAP pro delší objektivy
+
+Na stejné kartě lze pro běžné 30mm, 50mm a delší objektivy spustit externí
+[ASTAP](https://www.hnsky.org/astap.htm). PyRaw2Lum RAW dočasně vyvolá do TIFF,
+nechá ASTAP vytvořit WCS a uloží `*_astap_wcs.json` se středem pole, rozměrem
+pole, měřítkem pixelu a kompletní WCS hlavičkou. Výšku pole lze zadat ručně;
+u známých těl Canon 600D, R6m2 a 6D ji program po výběru RAWu odhadne z EXIF
+ohniska a výšky snímače.
+
+ASTAP i vhodná hvězdná databáze musejí být nainstalované samostatně. Pro pole
+vyšší než 6° a nejvýše 20° (například 50 mm + APS-C, asi 17°) ASTAP doporučuje
+**G05**; pro ještě širší pole **W08**. Databáze řady D mohou podle dokumentace
+sloužit od 0,6° výše a PyRaw2Lum je proto přijme také, G05 je však pro široké
+pole menší a účelnější. Program instalaci a dostupné databáze zjistí, nic
+velkého automaticky nestahuje.
+
+Rybí oko řeší nadále vlastní ruční astrometrie PyRaw2Lum, protože běžná WCS
+projekce a solver ASTAP tak silnou projekci nepokrývají. ASTAP integrace nyní
+řeší a ukládá geometrii delšího objektivu. Plné obdélníkové zpracování jasu a
+extinkce přes toto WCS je další krok; současná mapa jasu stále vyžaduje známý
+geometrický profil sestavy.
 
 ## Výstupní soubory
 
@@ -407,6 +457,8 @@ Volby:
 - `--timezone Europe/Prague` – zóna času uloženého v EXIFu,
 - `--north-angle` – pokročilé ruční zadání obrazového úhlu severu.
 - `--language cs|en` – jazyk popisů ve vytvořených obrázcích a hlášení.
+- `--vignetting-profile profil.json` – ručně určená vinětace pro CLI,
+- `--photometric-profile profil.json` – hvězdná absolutní kalibrace pro CLI.
 
 Astrometrické označování hvězd je dostupné v GUI.
 

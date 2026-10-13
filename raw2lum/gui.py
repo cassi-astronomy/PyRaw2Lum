@@ -17,6 +17,13 @@ from PIL import Image, ImageTk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 from .astrometry import BRIGHT_STARS, STAR_BY_LABEL, StarMatch, solve_orientation
+from .astap_solver import (
+    find_astap_executable,
+    installed_database_families,
+    recommended_database,
+    save_astap_solution,
+    solve_raw_with_astap,
+)
 from .core import (
     exif_time_to_utc,
     make_orientation_preview,
@@ -24,15 +31,23 @@ from .core import (
     read_exif,
 )
 from .extinction import (
+    bundled_gaia_catalog_path,
     make_bouguer_plot,
     measure_extinction,
     mid_exposure_utc,
     save_extinction_result,
 )
 from .i18n import LANGUAGES, load_language, set_language, tr
+from .photometric_calibration import (
+    StarCalibrationRegistry,
+    calibration_label,
+    derive_star_calibration,
+    save_star_calibration,
+)
 from .profiles import profile_for_camera
 from .vignetting import save_vignetting_calibration
 from .vignetting_calibration import calibrate_vignetting, make_vignetting_plot
+from .vignetting_registry import VignettingProfileRegistry, profile_label
 
 
 RAW_TYPES = [
@@ -100,15 +115,29 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.timezone_choice = tk.StringVar(value=tr(TIMEZONE_CHOICES[0][0]))
         self.scale = tk.IntVar(value=2)
         self.extinction_light = tk.StringVar()
-        self.extinction_catalog = tk.StringVar()
+        self.extinction_catalog = tk.StringVar(value=str(bundled_gaia_catalog_path()))
         self.extinction_mode = tk.StringVar(value="tracker")
         self.extinction_min_altitude = tk.DoubleVar(value=20.0)
-        self.extinction_max_v = tk.DoubleVar(value=7.5)
+        self.extinction_max_v = tk.DoubleVar(value=6.0)
         self.extinction_aperture = tk.DoubleVar(value=2.5)
-        self.vignetting_profile_path = tk.StringVar()
+        self.vignetting_registry = VignettingProfileRegistry()
+        self.vignetting_entries: list[tuple[Path, object]] = []
         self.calibration_images: list[Path] = []
+        self.target_shape = tk.StringVar(value="square")
+        self.target_size = tk.IntVar(value=40)
+        self.photometric_registry = StarCalibrationRegistry()
+        self.photometric_entries: list[tuple[Path, object]] = []
+        self.last_extinction_result = None
+        astap_executable = find_astap_executable()
+        self.astap_executable = tk.StringVar(
+            value=str(astap_executable) if astap_executable else ""
+        )
+        self.astap_image = tk.StringVar()
+        self.astap_fov_height = tk.DoubleVar(value=17.0)
         self.messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._build()
+        self._refresh_vignetting_profiles()
+        self._refresh_photometric_profiles()
         self.after(100, self._poll_messages)
 
     def _build(self) -> None:
@@ -188,13 +217,40 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         )
         ttk.Button(dark_buttons, text="Vymazat", command=self._clear_darks).pack(fill="x")
         self._path_row(root, "Výstupní složka", self.output_path, self._choose_output)
-        self._path_row(
-            root,
-            "Vlastní vinětace",
-            self.vignetting_profile_path,
-            self._choose_vignetting_profile,
-            hint="Volitelné: JSON vytvořený na kartě Kalibrace vinětace; prázdné = vestavěný profil.",
+        profile_box = ttk.LabelFrame(
+            root, text="Profily vinětace – automatický výběr", padding=8
         )
+        profile_box.pack(fill="x", pady=5)
+        profile_list_frame = ttk.Frame(profile_box)
+        profile_list_frame.pack(side="left", fill="both", expand=True)
+        self.vignetting_profile_list = tk.Listbox(
+            profile_list_frame, height=3, selectmode="extended"
+        )
+        profile_scrollbar = ttk.Scrollbar(
+            profile_list_frame,
+            orient="vertical",
+            command=self.vignetting_profile_list.yview,
+        )
+        self.vignetting_profile_list.configure(yscrollcommand=profile_scrollbar.set)
+        self.vignetting_profile_list.pack(side="left", fill="both", expand=True)
+        profile_scrollbar.pack(side="left", fill="y")
+        profile_buttons = ttk.Frame(profile_box)
+        profile_buttons.pack(side="left", fill="y", padx=(8, 0))
+        ttk.Button(
+            profile_buttons, text="Přidat profil…", command=self._add_vignetting_profile
+        ).pack(fill="x")
+        ttk.Button(
+            profile_buttons, text="Odebrat profil", command=self._remove_vignetting_profiles
+        ).pack(fill="x", pady=(6, 0))
+        ttk.Label(
+            profile_box,
+            text=(
+                "Pro každý light se automaticky vybere profil stejného fotoaparátu, "
+                "objektivu a clony; bez shody se použije vestavěná vinětace."
+            ),
+            foreground="#666666",
+            wraplength=310,
+        ).pack(side="left", padx=(10, 0))
         timezone_row = ttk.Frame(root)
         timezone_row.pack(fill="x", pady=5)
         ttk.Label(timezone_row, text="Čas uložený v EXIFu", width=18).pack(side="left")
@@ -234,6 +290,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         vignetting_tab = ttk.Frame(notebook, padding=18)
         notebook.add(vignetting_tab, text="Kalibrace vinětace")
         self._build_vignetting_tab(vignetting_tab)
+        photometric_tab = ttk.Frame(notebook, padding=18)
+        notebook.add(photometric_tab, text="Kalibrace sestavy – hvězdy")
+        self._build_photometric_calibration_tab(photometric_tab)
         self._localize_widget_tree(notebook)
         for tab_id in notebook.tabs():
             notebook.tab(tab_id, text=tr(notebook.tab(tab_id, "text")))
@@ -271,6 +330,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self._refresh_lights()
         self._refresh_darks()
         self._refresh_calibration_images()
+        self._refresh_vignetting_profiles()
+        self._refresh_photometric_profiles()
 
     def _timezone_value(self) -> str:
         selected = self.timezone_choice.get()
@@ -400,6 +461,29 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             ),
             wraplength=920,
         ).pack(anchor="w", pady=(2, 12))
+        target_box = ttk.LabelFrame(root, text="Kalibrační obrazec na monitoru", padding=8)
+        target_box.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            target_box,
+            text=(
+                "Otevře čistou černou plochu přes celý monitor s jediným bílým zdrojem "
+                "uprostřed. Zavře se libovolnou klávesou."
+            ),
+            wraplength=600,
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Radiobutton(
+            target_box, text="Čtverec", variable=self.target_shape, value="square"
+        ).pack(side="left", padx=4)
+        ttk.Radiobutton(
+            target_box, text="Kruh", variable=self.target_shape, value="circle"
+        ).pack(side="left", padx=4)
+        ttk.Spinbox(
+            target_box, textvariable=self.target_size, from_=8, to=200, width=5
+        ).pack(side="left", padx=4)
+        ttk.Label(target_box, text="px").pack(side="left")
+        ttk.Button(
+            target_box, text="Otevřít přes celou obrazovku", command=self._open_calibration_target
+        ).pack(side="left", padx=(8, 0))
         box = ttk.LabelFrame(root, text="Kalibrační RAW snímky", padding=10)
         box.pack(fill="x")
         list_frame = ttk.Frame(box)
@@ -450,6 +534,103 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.vignetting_plot_label.bind("<Button-1>", self._open_vignetting_plot)
         self.vignetting_preview_source: Image.Image | None = None
         self.vignetting_preview_photo: ImageTk.PhotoImage | None = None
+
+    def _build_photometric_calibration_tab(self, root: ttk.Frame) -> None:
+        ttk.Label(
+            root, text="Experimentální kalibrace sestavy na hvězdách", font=("Segoe UI", 20, "bold")
+        ).pack(anchor="w")
+        ttk.Label(
+            root,
+            text=(
+                "Z posledního úspěšného měření extinkce vytvoří absolutní fotometrický "
+                "profil fotoaparátu, objektivu a clony. Bouguerův fit oddělí extinkci "
+                "atmosféry; nulový bod se převede pomocí prostorového úhlu pixelu a "
+                "katalogové Johnsonovy V fotometrie."
+            ),
+            wraplength=920,
+        ).pack(anchor="w", pady=(2, 10))
+        ttk.Label(
+            root,
+            text=(
+                "Postup: nejprve na kartě Extinkce změřte kvalitní bezoblačný snímek "
+                "s širokým rozsahem vzdušné hmoty. Potom zde vytvořte profil. Funkce je "
+                "experimentální a nenahrazuje laboratorní kalibraci V(λ)."
+            ),
+            foreground="#555555",
+            wraplength=920,
+        ).pack(anchor="w", pady=(0, 12))
+        astap_box = ttk.LabelFrame(
+            root, text="Automatická astrometrie delšího objektivu (ASTAP)", padding=10
+        )
+        astap_box.pack(fill="x", pady=(0, 10))
+        ttk.Label(
+            astap_box,
+            text=(
+                "Pro běžný (nerektifikovaný rybím okem) snímek vytvoří WCS řešení. "
+                "Výšku zorného pole lze upravit; pro 50 mm + APS-C je přibližně 17°."
+            ),
+            wraplength=900,
+        ).pack(anchor="w", pady=(0, 5))
+        self._path_row(
+            astap_box,
+            "Program ASTAP:",
+            self.astap_executable,
+            self._choose_astap_executable,
+        )
+        self._path_row(
+            astap_box,
+            "Snímek RAW:",
+            self.astap_image,
+            self._choose_astap_image,
+        )
+        astap_options = ttk.Frame(astap_box)
+        astap_options.pack(fill="x", pady=(4, 0))
+        ttk.Label(astap_options, text="Výška pole [°]:").pack(side="left")
+        ttk.Spinbox(
+            astap_options,
+            from_=0.1,
+            to=120.0,
+            increment=0.1,
+            width=8,
+            textvariable=self.astap_fov_height,
+        ).pack(side="left", padx=(6, 12))
+        self.astap_button = ttk.Button(
+            astap_options, text="Vyřešit WCS", command=self._start_astap_solve
+        )
+        self.astap_button.pack(side="left")
+        self.astap_progress = ttk.Progressbar(astap_options, mode="indeterminate", length=140)
+        self.astap_progress.pack(side="left", padx=(12, 0))
+        self.astap_database_label = ttk.Label(astap_options, foreground="#555555")
+        self.astap_database_label.pack(side="left", padx=(12, 0))
+        self._refresh_astap_database_status()
+        box = ttk.LabelFrame(root, text="Uložené fotometrické profily", padding=10)
+        box.pack(fill="both", expand=True)
+        list_frame = ttk.Frame(box)
+        list_frame.pack(side="left", fill="both", expand=True)
+        self.photometric_profile_list = tk.Listbox(
+            list_frame, height=10, selectmode="extended"
+        )
+        scroll = ttk.Scrollbar(
+            list_frame, orient="vertical", command=self.photometric_profile_list.yview
+        )
+        self.photometric_profile_list.configure(yscrollcommand=scroll.set)
+        self.photometric_profile_list.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="left", fill="y")
+        buttons = ttk.Frame(box)
+        buttons.pack(side="left", fill="y", padx=(10, 0))
+        ttk.Button(
+            buttons,
+            text="Vytvořit z posledního měření extinkce",
+            command=self._create_star_calibration,
+        ).pack(fill="x")
+        ttk.Button(
+            buttons, text="Přidat profil…", command=self._add_photometric_profile
+        ).pack(fill="x", pady=(8, 0))
+        ttk.Button(
+            buttons, text="Odebrat profil", command=self._remove_photometric_profiles
+        ).pack(fill="x", pady=(8, 0))
+        self.photometric_log = tk.Text(root, height=8, state="disabled", wrap="word")
+        self.photometric_log.pack(fill="x", pady=(12, 0))
 
     def _path_row(
         self,
@@ -1087,13 +1268,236 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if name:
             self.output_path.set(name)
 
-    def _choose_vignetting_profile(self) -> None:
+    def _add_vignetting_profile(self) -> None:
         name = filedialog.askopenfilename(
             title="Vyberte profil vinětace PyRaw2Lum",
             filetypes=[("Profil vinětace JSON", "*.json"), ("Všechny soubory", "*.*")],
         )
+        if not name:
+            return
+        try:
+            self.vignetting_registry.import_file(name)
+            self._refresh_vignetting_profiles()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("Profil nelze přidat", str(exc))
+
+    def _refresh_vignetting_profiles(self) -> None:
+        self.vignetting_entries = self.vignetting_registry.entries()
+        self.vignetting_profile_list.delete(0, "end")
+        for _path, calibration in self.vignetting_entries:
+            self.vignetting_profile_list.insert("end", profile_label(calibration))
+
+    def _remove_vignetting_profiles(self) -> None:
+        selection = tuple(self.vignetting_profile_list.curselection())
+        if not selection:
+            return
+        if not messagebox.askyesno(
+            "Odebrat profily vinětace",
+            "Opravdu odebrat vybrané profily ze správce PyRaw2Lum?",
+        ):
+            return
+        for index in reversed(selection):
+            path, _calibration = self.vignetting_entries[index]
+            self.vignetting_registry.remove(path)
+        self._refresh_vignetting_profiles()
+
+    def _automatic_vignetting_path(self, light: Path) -> str | None:
+        exif = read_exif(light)
+        profile = profile_for_camera(exif.camera_model)
+        match = self.vignetting_registry.match(exif, profile)
+        return str(match) if match is not None else None
+
+    def _refresh_photometric_profiles(self) -> None:
+        self.photometric_entries = self.photometric_registry.entries()
+        self.photometric_profile_list.delete(0, "end")
+        for _path, calibration in self.photometric_entries:
+            self.photometric_profile_list.insert("end", calibration_label(calibration))
+
+    def _add_photometric_profile(self) -> None:
+        name = filedialog.askopenfilename(
+            title="Vyberte hvězdný fotometrický profil PyRaw2Lum",
+            filetypes=[("Fotometrický profil JSON", "*.json"), ("Všechny soubory", "*.*")],
+        )
+        if not name:
+            return
+        try:
+            self.photometric_registry.import_file(name)
+            self._refresh_photometric_profiles()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("Profil nelze přidat", str(exc))
+
+    def _remove_photometric_profiles(self) -> None:
+        selection = tuple(self.photometric_profile_list.curselection())
+        if not selection:
+            return
+        if not messagebox.askyesno(
+            "Odebrat fotometrické profily",
+            "Opravdu odebrat vybrané hvězdné kalibrace ze správce PyRaw2Lum?",
+        ):
+            return
+        for index in reversed(selection):
+            path, _calibration = self.photometric_entries[index]
+            self.photometric_registry.remove(path)
+        self._refresh_photometric_profiles()
+
+    def _automatic_photometric_path(self, light: Path) -> str | None:
+        exif = read_exif(light)
+        profile = profile_for_camera(exif.camera_model)
+        match = self.photometric_registry.match(exif, profile)
+        return str(match) if match is not None else None
+
+    def _write_photometric(self, message: str) -> None:
+        self.photometric_log.configure(state="normal")
+        self.photometric_log.insert("end", tr(message) + "\n")
+        self.photometric_log.see("end")
+        self.photometric_log.configure(state="disabled")
+
+    def _refresh_astap_database_status(self) -> None:
+        executable = Path(self.astap_executable.get()) if self.astap_executable.get() else None
+        installed = installed_database_families(executable) if executable and executable.is_file() else ()
+        try:
+            recommended = recommended_database(float(self.astap_fov_height.get()))
+        except (ValueError, tk.TclError):
+            recommended = "?"
+        found = ", ".join(installed) if installed else tr("žádná")
+        self.astap_database_label.configure(
+            text=tr(f"Databáze: {found}; doporučena {recommended}")
+        )
+
+    def _choose_astap_executable(self) -> None:
+        name = filedialog.askopenfilename(
+            title="Vyberte program ASTAP",
+            filetypes=[("Program ASTAP", "astap*.exe"), ("Všechny soubory", "*.*")],
+        )
         if name:
-            self.vignetting_profile_path.set(name)
+            self.astap_executable.set(name)
+            self._refresh_astap_database_status()
+
+    def _choose_astap_image(self) -> None:
+        name = filedialog.askopenfilename(
+            title="Vyberte hvězdný RAW pro ASTAP", filetypes=RAW_TYPES
+        )
+        if name:
+            self.astap_image.set(name)
+            try:
+                exif = read_exif(name)
+                model = exif.camera_model.casefold()
+                sensor_height = 14.9 if "600d" in model else 24.0 if any(
+                    value in model for value in ("r6", "6d")
+                ) else None
+                if sensor_height and exif.focal_length_mm:
+                    fov = math.degrees(
+                        2.0 * math.atan(sensor_height / (2.0 * exif.focal_length_mm))
+                    )
+                    self.astap_fov_height.set(round(fov, 2))
+            except (OSError, ValueError, TypeError):
+                pass
+            self._refresh_astap_database_status()
+
+    def _start_astap_solve(self) -> None:
+        source = Path(self.astap_image.get())
+        executable = Path(self.astap_executable.get())
+        try:
+            field_height = float(self.astap_fov_height.get())
+        except (ValueError, tk.TclError):
+            messagebox.showerror("Neplatné nastavení", "Zkontrolujte výšku zorného pole ASTAP.")
+            return
+        self._refresh_astap_database_status()
+        if not source.is_file():
+            messagebox.showerror("Chybí snímek", "Vyberte existující hvězdný RAW pro ASTAP.")
+            return
+        if not executable.is_file():
+            messagebox.showerror("Chybí ASTAP", "Vyberte spustitelný soubor programu ASTAP.")
+            return
+        self.astap_button.configure(state="disabled")
+        self.astap_progress.start(12)
+        self._write_photometric(
+            f"\nASTAP: {source.name}; výška pole {field_height:g}°; "
+            f"doporučená databáze {recommended_database(field_height)}"
+        )
+        threading.Thread(
+            target=self._astap_worker,
+            args=(source, executable, field_height),
+            daemon=True,
+        ).start()
+
+    def _astap_worker(self, source: Path, executable: Path, field_height: float) -> None:
+        try:
+            solution = solve_raw_with_astap(
+                source,
+                executable,
+                field_height,
+                progress=lambda message: self.messages.put(("astap_log", message)),
+            )
+            output = Path(self.output_path.get()) / f"{source.stem}_astap_wcs.json"
+            save_astap_solution(solution, output)
+            self.messages.put(("astap_done", (solution, output)))
+        except Exception as exc:
+            self.messages.put(("astap_error", str(exc)))
+
+    def _create_star_calibration(self) -> None:
+        result = self.last_extinction_result
+        if result is None:
+            messagebox.showerror(
+                "Chybí měření extinkce",
+                "Nejprve na kartě Extinkce dokončete měření kvalitního snímku.",
+            )
+            return
+        try:
+            source = Path(result.source)
+            exif = read_exif(source)
+            profile = profile_for_camera(exif.camera_model)
+            calibration = derive_star_calibration(result, profile, exif)
+            managed_path = self.photometric_registry.store(calibration)
+            output_path = Path(self.output_path.get()) / (
+                f"{source.stem}_fotometricka_kalibrace_hvezdy.json"
+            )
+            save_star_calibration(calibration, output_path)
+            self._refresh_photometric_profiles()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("Kalibraci nelze vytvořit", str(exc))
+            return
+        self._write_photometric(
+            "\nPROFIL ULOŽEN\n"
+            f"Převodní koeficient T: {calibration.calibration_divisor:.7g}\n"
+            f"Hvězd ve fitu: {calibration.used_stars}\n"
+            f"RMS fitu: {calibration.fit_rms_mag:.3f} mag\n"
+            f"Extinkce: {calibration.extinction_mag_per_airmass:.4f} mag/airmass\n"
+            f"Spravovaný profil: {managed_path}\nKopie výsledku: {output_path}"
+        )
+        messagebox.showinfo(
+            "Fotometrická kalibrace vytvořena",
+            "Experimentální profil byl uložen a bude se automaticky používat pro shodnou sestavu.",
+        )
+
+    def _open_calibration_target(self) -> None:
+        try:
+            size = max(8, min(200, int(self.target_size.get())))
+        except (ValueError, tk.TclError):
+            size = 40
+            self.target_size.set(size)
+        dialog = tk.Toplevel(self)
+        dialog.configure(background="black")
+        dialog.attributes("-fullscreen", True)
+        dialog.attributes("-topmost", True)
+        dialog.configure(cursor="none")
+        canvas = tk.Canvas(dialog, background="black", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+
+        def draw_target(_event=None) -> None:
+            canvas.delete("all")
+            center_x = canvas.winfo_width() / 2.0
+            center_y = canvas.winfo_height() / 2.0
+            half = size / 2.0
+            bounds = (center_x - half, center_y - half, center_x + half, center_y + half)
+            if self.target_shape.get() == "circle":
+                canvas.create_oval(*bounds, fill="white", outline="white")
+            else:
+                canvas.create_rectangle(*bounds, fill="white", outline="white")
+
+        dialog.bind("<Configure>", draw_target)
+        dialog.bind("<KeyPress>", lambda _event: dialog.destroy())
+        dialog.after(100, dialog.focus_force)
 
     def _choose_extinction_catalog(self) -> None:
         name = filedialog.askopenfilename(
@@ -1242,6 +1646,12 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if not catalog.is_file():
             messagebox.showerror("Chybí katalog", "Vyberte existující CSV export Gaia GSPC.")
             return
+        try:
+            vignetting_path = self._automatic_vignetting_path(light)
+            photometric_path = self._automatic_photometric_path(light)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Kalibrační profil nelze vybrat", str(exc))
+            return
         if light not in self.orientation_matrices or light not in self.site_coordinates:
             messagebox.showerror(
                 "Chybí astrometrie",
@@ -1283,7 +1693,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             maximum_v,
             aperture,
             self.output_path.get(),
-            self.vignetting_profile_path.get().strip() or None,
+            vignetting_path,
+            photometric_path,
         )
         threading.Thread(target=self._extinction_worker, args=job, daemon=True).start()
 
@@ -1303,6 +1714,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         aperture: float,
         output_path: str,
         vignetting_calibration_path: str | None,
+        photometric_calibration_path: str | None,
     ) -> None:
         try:
             result = measure_extinction(
@@ -1319,6 +1731,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 maximum_v_mag=maximum_v,
                 aperture_radius_px=aperture,
                 vignetting_calibration_path=vignetting_calibration_path,
+                photometric_calibration_path=photometric_calibration_path,
                 progress=lambda text: self.messages.put(("ext_log", text)),
             )
             preview = make_bouguer_plot(result)
@@ -1338,10 +1751,6 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if not self.darks:
             messagebox.showerror("Chybí dark", "Přidejte alespoň jeden dark RAW snímek.")
             return
-        vignetting_path = self.vignetting_profile_path.get().strip()
-        if vignetting_path and not Path(vignetting_path).is_file():
-            messagebox.showerror("Chybí profil", "Vybraný JSON profil vinětace neexistuje.")
-            return
         self.start_button.configure(state="disabled")
         self.progress.configure(maximum=len(self.lights), value=0)
         self._write_log("Spouštím zpracování…")
@@ -1355,7 +1764,6 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.output_path.get(),
             int(self.scale.get()),
             self._timezone_value(),
-            vignetting_path or None,
             self.language_code,
         )
         threading.Thread(target=self._worker, args=job, daemon=True).start()
@@ -1371,12 +1779,21 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         output_path: str,
         display_scale: int,
         source_timezone: str,
-        vignetting_calibration_path: str | None,
         language: str,
     ) -> None:
         errors: list[str] = []
         for index, light in enumerate(lights, start=1):
             try:
+                vignetting_calibration_path = self._automatic_vignetting_path(light)
+                photometric_calibration_path = self._automatic_photometric_path(light)
+                if vignetting_calibration_path:
+                    self.messages.put(
+                        ("log", f"Automaticky vybrán profil vinětace: {vignetting_calibration_path}")
+                    )
+                if photometric_calibration_path:
+                    self.messages.put(
+                        ("log", f"Automaticky vybrán hvězdný fotometrický profil: {photometric_calibration_path}")
+                    )
                 process_file(
                     light,
                     dark_paths,
@@ -1389,6 +1806,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     orientation_matrix=orientation_matrices.get(light),
                     orientation_info=orientation_info.get(light),
                     vignetting_calibration_path=vignetting_calibration_path,
+                    photometric_calibration_path=photometric_calibration_path,
                     language=language,
                 )
             except Exception as exc:
@@ -1423,6 +1841,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     self.extinction_progress.stop()
                     self.extinction_button.configure(state="normal")
                     result, paths = payload
+                    self.last_extinction_result = result
                     color = (
                         f"\nBarevný člen C: {result.color_coefficient:+.4f} mag/(B−V)"
                         if result.color_coefficient is not None
@@ -1456,24 +1875,47 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     self.vignetting_progress.stop()
                     self.vignetting_button.configure(state="normal")
                     calibration, profile_path, plot_path = payload
-                    self.vignetting_profile_path.set(str(profile_path))
+                    managed_path = self.vignetting_registry.store(calibration)
+                    self._refresh_vignetting_profiles()
                     rms = ", ".join(
                         f"{channel} {calibration.fit_rms_percent[channel]:.2f} %"
                         for channel in ("R", "G", "B")
                     )
                     self._write_vignetting(
                         f"\nPROFIL ULOŽEN\n{profile_path}\nGraf: {plot_path}\n"
-                        f"RMS fitu: {rms}\nProfil je automaticky vybraný na kartě Jas oblohy."
+                        f"RMS fitu: {rms}\nProfil byl přidán do automatického správce."
                     )
                     messagebox.showinfo(
                         "Kalibrace vinětace dokončena",
-                        f"Profil byl uložen a vybrán pro další zpracování.\n\n{profile_path}",
+                        f"Profil byl uložen a přidán do správce.\n\n{managed_path}",
                     )
                 elif kind == "vign_error":
                     self.vignetting_progress.stop()
                     self.vignetting_button.configure(state="normal")
                     self._write_vignetting(f"\nCHYBA: {payload}")
                     messagebox.showerror("Vinětaci nelze zkalibrovat", str(payload))
+                elif kind == "astap_log":
+                    self._write_photometric(str(payload))
+                elif kind == "astap_done":
+                    self.astap_progress.stop()
+                    self.astap_button.configure(state="normal")
+                    solution, output = payload
+                    self._write_photometric(
+                        "ASTAP WCS VYŘEŠENO\n"
+                        f"Střed: RA {solution.center_ra_deg:.5f}°, "
+                        f"Dec {solution.center_dec_deg:+.5f}°\n"
+                        f"Pole: {solution.field_width_deg:.3f} × "
+                        f"{solution.field_height_deg:.3f}°\n"
+                        f"Měřítko: {solution.pixel_scale_x_arcsec:.2f} × "
+                        f"{solution.pixel_scale_y_arcsec:.2f} arcsec/pixel\n"
+                        f"JSON WCS: {output}"
+                    )
+                    messagebox.showinfo("Astrometrie dokončena", "ASTAP úspěšně vyřešil WCS snímku.")
+                elif kind == "astap_error":
+                    self.astap_progress.stop()
+                    self.astap_button.configure(state="normal")
+                    self._write_photometric(f"\nASTAP CHYBA: {payload}")
+                    messagebox.showerror("ASTAP snímek nevyřešil", str(payload))
         except queue.Empty:
             pass
         self.after(100, self._poll_messages)

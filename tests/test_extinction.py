@@ -12,6 +12,7 @@ from raw2lum.extinction import (
     StarPhotometry,
     _isolated_candidates,
     _robust_fit,
+    bundled_gaia_catalog_path,
     load_gaia_gspc_csv,
     mid_exposure_utc,
     save_extinction_result,
@@ -19,6 +20,11 @@ from raw2lum.extinction import (
 
 
 class ExtinctionTests(unittest.TestCase):
+    def test_bundled_catalog_is_available_offline(self) -> None:
+        path = bundled_gaia_catalog_path()
+        self.assertTrue(path.is_file())
+        self.assertGreater(len(load_gaia_gspc_csv(path, max_v_mag=6.0)), 3000)
+
     def test_mid_exposure_uses_half_of_exposure(self) -> None:
         self.assertEqual(
             mid_exposure_utc("2026-09-15 20:35:36 UTC", 179.0),
