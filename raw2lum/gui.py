@@ -32,6 +32,8 @@ from .core import (
 )
 from .extinction import (
     bundled_gaia_catalog_path,
+    combine_extinction_preview,
+    make_aperture_diagnostic,
     make_bouguer_plot,
     measure_extinction,
     mid_exposure_utc,
@@ -119,6 +121,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.extinction_mode = tk.StringVar(value="tracker")
         self.extinction_min_altitude = tk.DoubleVar(value=20.0)
         self.extinction_max_v = tk.DoubleVar(value=6.0)
+        self.extinction_aperture_mode = tk.StringVar(value="auto")
         self.extinction_aperture = tk.DoubleVar(value=2.5)
         self.vignetting_registry = VignettingProfileRegistry()
         self.vignetting_entries: list[tuple[Path, object]] = []
@@ -400,7 +403,6 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         rows = (
             ("Minimální výška nad obzorem", self.extinction_min_altitude, "°", 15.0, 45.0, 1.0),
             ("Nejslabší katalogová hvězda V", self.extinction_max_v, "mag", 5.0, 10.0, 0.1),
-            ("Poloměr apertury", self.extinction_aperture, "px mapy", 1.5, 6.0, 0.5),
         )
         for row_index, (label, variable, unit, lower, upper, increment) in enumerate(rows):
             ttk.Label(options, text=label).grid(row=row_index, column=0, sticky="w", pady=3)
@@ -413,10 +415,40 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 width=8,
             ).grid(row=row_index, column=1, padx=(12, 5), pady=3)
             ttk.Label(options, text=unit).grid(row=row_index, column=2, sticky="w", pady=3)
+        aperture_row = ttk.Frame(options)
+        aperture_row.grid(row=2, column=0, columnspan=3, sticky="w", pady=(7, 2))
+        ttk.Label(aperture_row, text="Apertura").pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(
+            aperture_row,
+            text="Automatická – křivka růstu",
+            variable=self.extinction_aperture_mode,
+            value="auto",
+            command=self._update_extinction_aperture_state,
+        ).pack(side="left")
+        ttk.Radiobutton(
+            aperture_row,
+            text="Ruční poloměr",
+            variable=self.extinction_aperture_mode,
+            value="manual",
+            command=self._update_extinction_aperture_state,
+        ).pack(side="left", padx=(14, 5))
+        self.extinction_aperture_spin = ttk.Spinbox(
+            aperture_row,
+            textvariable=self.extinction_aperture,
+            from_=1.0,
+            to=8.0,
+            increment=0.5,
+            width=7,
+        )
+        self.extinction_aperture_spin.pack(side="left")
+        ttk.Label(aperture_row, text="px mapy").pack(side="left", padx=(5, 0))
+        self._update_extinction_aperture_state()
 
         ttk.Label(
             root,
             text=(
+                "Automatika vybere jeden společný poloměr z mediánu křivek růstu jasných "
+                "izolovaných hvězd; tím nevzniká závislost apertury na jasu hvězdy. "
                 "Snímky na trackeru používají kruhovou aperturu. U pevného stativu se pro "
                 "každou hvězdu vypočte vlastní stopa mezi začátkem a koncem expozice. "
                 "Čas astrometrie i extinkce se vztahuje ke středu expozice."
@@ -438,7 +470,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.extinction_result.pack(fill="x", pady=(12, 6))
         self.extinction_plot_label = tk.Label(
             root,
-            text="Po změření se zde ihned zobrazí Bouguerův graf.",
+            text="Po změření se zde ihned zobrazí Bouguerův graf a kontrola apertur.",
             background="#f2f2f2",
             foreground="#555555",
             cursor="hand2",
@@ -447,6 +479,11 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.extinction_plot_label.bind("<Button-1>", self._open_extinction_plot)
         self.extinction_preview_source: Image.Image | None = None
         self.extinction_preview_photo: ImageTk.PhotoImage | None = None
+
+    def _update_extinction_aperture_state(self) -> None:
+        if hasattr(self, "extinction_aperture_spin"):
+            state = "normal" if self.extinction_aperture_mode.get() == "manual" else "disabled"
+            self.extinction_aperture_spin.configure(state=state)
 
     def _build_vignetting_tab(self, root: ttk.Frame) -> None:
         ttk.Label(root, text="Kalibrace vinětace", font=("Segoe UI", 20, "bold")).pack(
@@ -1634,6 +1671,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             minimum_altitude = float(self.extinction_min_altitude.get())
             maximum_v = float(self.extinction_max_v.get())
             aperture = float(self.extinction_aperture.get())
+            aperture_mode = self.extinction_aperture_mode.get()
         except (TypeError, ValueError, tk.TclError):
             messagebox.showerror("Neplatné nastavení", "Zkontrolujte číselné volby extinkce.")
             return
@@ -1661,7 +1699,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         if not 10.0 <= minimum_altitude <= 60.0 or not 3.0 <= maximum_v <= 10.0:
             messagebox.showerror("Neplatné nastavení", "Výška nebo mezní V magnituda jsou mimo povolený rozsah.")
             return
-        if not 1.0 <= aperture <= 8.0:
+        if aperture_mode == "manual" and not 1.0 <= aperture <= 8.0:
             messagebox.showerror("Neplatné nastavení", "Poloměr apertury musí být 1 až 8 pixelů.")
             return
 
@@ -1691,6 +1729,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.extinction_mode.get(),
             minimum_altitude,
             maximum_v,
+            aperture_mode,
             aperture,
             self.output_path.get(),
             vignetting_path,
@@ -1711,6 +1750,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         mode: str,
         minimum_altitude: float,
         maximum_v: float,
+        aperture_mode: str,
         aperture: float,
         output_path: str,
         vignetting_calibration_path: str | None,
@@ -1729,17 +1769,25 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 mode=mode,
                 minimum_altitude_deg=minimum_altitude,
                 maximum_v_mag=maximum_v,
+                aperture_mode=aperture_mode,
                 aperture_radius_px=aperture,
                 vignetting_calibration_path=vignetting_calibration_path,
                 photometric_calibration_path=photometric_calibration_path,
                 progress=lambda text: self.messages.put(("ext_log", text)),
             )
-            preview = make_bouguer_plot(result)
+            aperture_diagnostic = make_aperture_diagnostic(
+                make_orientation_preview(light), result
+            )
+            preview = combine_extinction_preview(
+                make_bouguer_plot(result), aperture_diagnostic
+            )
             preview_shown = threading.Event()
             self.messages.put(("ext_preview", (preview, preview_shown)))
             # GUI dostane nahled pred tim, nez se zacnou zapisovat vystupni soubory.
             preview_shown.wait(timeout=2.0)
-            paths = save_extinction_result(result, output_path)
+            paths = save_extinction_result(
+                result, output_path, aperture_diagnostic=aperture_diagnostic
+            )
             self.messages.put(("ext_done", (result, paths)))
         except Exception as exc:
             self.messages.put(("ext_error", str(exc)))
@@ -1847,6 +1895,18 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                         if result.color_coefficient is not None
                         else "\nBarevný člen: nebyl fitován"
                     )
+                    aperture_text = (
+                        f"Apertura: {result.aperture_mode}, "
+                        f"r = {result.aperture_radius_px:g} px"
+                        + (
+                            f" ({result.aperture_calibration_stars} kalibračních hvězd)"
+                            if result.aperture_mode == "auto"
+                            else ""
+                        )
+                    )
+                    aperture_path_text = (
+                        f"Kontrola apertur: {paths[3]}" if len(paths) > 3 else ""
+                    )
                     self._write_extinction(
                         "\nVÝSLEDEK (experimentální)\n"
                         f"Extinkce k: {result.extinction_mag_per_airmass:.4f} "
@@ -1856,8 +1916,10 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                         f"Rozsah vzdušné hmoty: {result.airmass_min:.2f}–{result.airmass_max:.2f}"
                         f"\nRMS fitu: {result.fit_rms_mag:.3f} mag"
                         f"{color}\nStřed expozice: {result.mid_exposure_utc}\n"
+                        f"{aperture_text}\n"
                         f"JSON: {paths[0]}\nCSV hvězd: {paths[1]}\n"
-                        f"Bouguerův graf: {paths[2]}"
+                        f"Bouguerův graf: {paths[2]}\n"
+                        f"{aperture_path_text}"
                     )
                 elif kind == "ext_error":
                     self.extinction_progress.stop()

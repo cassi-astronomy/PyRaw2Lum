@@ -258,13 +258,24 @@ be selected; `ra`, `dec`, and `v_jkc_mag` are required.
 3. Choose **Tracker** for point-like stars or **Fixed tripod**. Fixed-tripod
    mode computes an individual trail length and direction from declination and
    exposure time for every star.
-4. For a first run, keep the 20° minimum altitude, `V = 6.0` limit, and
-   2.5-pixel aperture.
+4. Leave **Automatic – curve of growth** selected for the first run. Manual
+   radius remains available from 1 to 8 map pixels.
 
-The Bouguer plot is shown on the tab immediately when the fit finishes, before
-files are saved. Click the preview to inspect it at full size. Outputs are
-`*_extinkce.json`, `*_extinkce_hvezdy.csv`, and
-`*_extinkce_bouguer.png`.
+Automatic mode measures bright, isolated, unsaturated stars through a series
+of radii from 1.5 to 8 pixels. It chooses one common radius where the median
+curve of growth contains at least 98.5% of the measured flux and has reached a
+stable plateau. The common radius avoids making the aperture itself dependent
+on stellar brightness and therefore altitude. If at least five suitable stars
+or a stable plateau are unavailable, the automatic run stops instead of
+silently returning a questionable result; manual mode can then be used.
+
+The Bouguer plot and aperture contact sheet are shown side by side immediately
+when the fit finishes, before files are saved. The contact sheet enlarges
+individual stars at the pixel level; yellow outlines show the actual circular
+or trail-shaped apertures. It also plots the automatic median curve of growth.
+Click the preview to inspect it at full size. Outputs are
+`*_extinkce.json`, `*_extinkce_hvezdy.csv`, `*_extinkce_bouguer.png`, and
+`*_extinkce_apertury.png`.
 
 This remains a research feature, not a laboratory-validated output. A broad
 air-mass range, low fit RMS, and clear apertures free from clouds, the Milky

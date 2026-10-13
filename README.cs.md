@@ -302,19 +302,29 @@ lze stále vybrat ručně; program potřebuje `ra`, `dec` a `v_jkc_mag`.
    stativu program každé hvězdě samostatně spočítá délku i směr stopy podle
    deklinace a času expozice; Polárka proto dostane téměř bodovou aperturu a
    hvězdy u rovníku delší.
-4. Pro první pokus ponechte minimální výšku 20°, mez `V = 6,0` a aperturu
-   2,5 pixelu. Potom spusťte měření.
+4. Pro první pokus ponechte **Automatická – křivka růstu**. Ručně lze nadále
+   zadat poloměr 1 až 8 pixelů mapy.
 
-Jakmile je fit hotový, Bouguerův graf se zobrazí přímo na kartě ještě před
-zápisem výsledných souborů. Kliknutím na náhled se otevře v plné velikosti,
-takže lze okamžitě zkontrolovat rozptyl bodů, odlehlé hvězdy a rozsah vzdušné
-hmoty.
+Automatika změří jasné izolované nesaturované hvězdy postupně v poloměrech
+1,5 až 8 pixelů. Pro celý snímek vybere jeden společný poloměr, kde medián
+křivek růstu obsahuje alespoň 98,5 % změřeného toku a dosáhl stabilního
+plateau. Společný poloměr brání tomu, aby clonka sama závisela na jasnosti
+hvězdy, a tím i na výšce nad obzorem. Pokud není alespoň pět vhodných hvězd
+nebo se plateau nenajde, automatické měření se raději zastaví; potom lze použít
+ruční režim.
 
-Vzniknou tři diagnostické soubory:
+Jakmile je fit hotový, Bouguerův graf a kontrolní list apertur se zobrazí vedle
+sebe přímo na kartě ještě před zápisem souborů. Kontrolní list zvětšuje
+jednotlivé hvězdy na úroveň pixelů; žluté obrysy ukazují skutečnou kruhovou
+nebo protáhlou aperturu. Zobrazuje také medián automatických křivek růstu.
+Kliknutím se náhled otevře v plné velikosti.
+
+Vzniknou čtyři diagnostické soubory:
 
 - `*_extinkce.json` – výsledek, nastavení a všechna měření,
 - `*_extinkce_hvezdy.csv` – tabulka přijatých i odmítnutých hvězd s důvodem,
-- `*_extinkce_bouguer.png` – Bouguerův diagram, fit a odlehlé body.
+- `*_extinkce_bouguer.png` – Bouguerův diagram, fit a odlehlé body,
+- `*_extinkce_apertury.png` – zvětšené hvězdy, hranice apertur a křivka růstu.
 
 Jde zatím o výzkumnou funkci, nikoli o laboratorně ověřený výstup. Výsledek
 je důvěryhodnější při širokém rozsahu vzdušné hmoty, nízkém RMS fitu a bez

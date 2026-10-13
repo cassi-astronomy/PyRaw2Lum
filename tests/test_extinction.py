@@ -10,6 +10,7 @@ from raw2lum.extinction import (
     CatalogStar,
     ExtinctionResult,
     StarPhotometry,
+    _automatic_aperture,
     _isolated_candidates,
     _robust_fit,
     bundled_gaia_catalog_path,
@@ -20,6 +21,36 @@ from raw2lum.extinction import (
 
 
 class ExtinctionTests(unittest.TestCase):
+    def test_automatic_aperture_finds_gaussian_curve_of_growth_plateau(self) -> None:
+        size = 180
+        yy, xx = np.indices((size, size), dtype=np.float64)
+        values = np.full((size, size), 100.0, dtype=np.float64)
+        centers = [(25 + (index % 5) * 30, 35 + (index // 5) * 70) for index in range(10)]
+        for x, y in centers:
+            values += 1200.0 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 1.15**2))
+        stars = [
+            CatalogStar(str(index), 0.0, 0.0, 3.0 + index * 0.1, 3.5)
+            for index in range(10)
+        ]
+        refined = {
+            index: (float(x), float(y), float(x), float(y))
+            for index, (x, y) in enumerate(centers)
+        }
+
+        radius, radii, growth, count = _automatic_aperture(
+            values,
+            np.zeros_like(values, dtype=bool),
+            refined,
+            np.arange(10),
+            stars,
+        )
+
+        self.assertGreaterEqual(radius, 2.5)
+        self.assertLessEqual(radius, 5.0)
+        self.assertEqual(count, 10)
+        self.assertEqual(len(radii), len(growth))
+        self.assertGreaterEqual(growth[radii.index(radius)], 0.985)
+
     def test_bundled_catalog_is_available_offline(self) -> None:
         path = bundled_gaia_catalog_path()
         self.assertTrue(path.is_file())

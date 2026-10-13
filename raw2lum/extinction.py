@@ -60,6 +60,8 @@ class StarPhotometry:
     used: bool
     reason: str
     residual_mag: float | None = None
+    aperture_radius_px: float = 2.5
+    trail_angle_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,11 @@ class ExtinctionResult:
     mid_exposure_utc: str
     measurements: tuple[StarPhotometry, ...]
     calibration_divisor_used: float = 1.0
+    aperture_mode: str = "manual"
+    aperture_radius_px: float = 2.5
+    aperture_test_radii_px: tuple[float, ...] = ()
+    aperture_growth_curve: tuple[float, ...] = ()
+    aperture_calibration_stars: int = 0
 
     def report(self) -> dict[str, object]:
         result = asdict(self)
@@ -303,6 +310,98 @@ def _measure_track(
     return flux, snr, ""
 
 
+def _track_growth_curve(
+    values: np.ndarray,
+    saturated: np.ndarray,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    radii: np.ndarray,
+) -> tuple[np.ndarray, float] | None:
+    """Return a monotonic curve of growth using one fixed outer sky annulus."""
+
+    maximum = float(np.max(radii))
+    outer = maximum + 5.0
+    xmin = max(0, int(math.floor(min(x0, x1) - outer)))
+    xmax = min(values.shape[1], int(math.ceil(max(x0, x1) + outer + 1)))
+    ymin = max(0, int(math.floor(min(y0, y1) - outer)))
+    ymax = min(values.shape[0], int(math.ceil(max(y0, y1) + outer + 1)))
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    yy, xx = np.indices((ymax - ymin, xmax - xmin), dtype=np.float64)
+    xx += xmin
+    yy += ymin
+    distance = _distance_to_segment(xx, yy, x0, y0, x1, y1)
+    local = values[ymin:ymax, xmin:xmax]
+    finite = np.isfinite(local)
+    annulus = (distance >= maximum + 2.0) & (distance <= outer) & finite
+    if np.count_nonzero(annulus) < 20:
+        return None
+    if np.any(saturated[ymin:ymax, xmin:xmax][distance <= maximum]):
+        return None
+    sky_values = local[annulus]
+    sky = float(np.nanmedian(sky_values))
+    noise = 1.4826 * float(np.nanmedian(np.abs(sky_values - sky)))
+    fluxes: list[float] = []
+    counts: list[int] = []
+    for radius in radii:
+        aperture = (distance <= radius) & finite
+        counts.append(int(np.count_nonzero(aperture)))
+        fluxes.append(float(np.nansum(local[aperture] - sky)))
+    growth = np.maximum.accumulate(np.maximum(np.asarray(fluxes), 0.0))
+    total = float(growth[-1])
+    if not math.isfinite(total) or total <= 0:
+        return None
+    n_ap = counts[-1]
+    n_bg = int(np.count_nonzero(annulus))
+    uncertainty = max(noise * math.sqrt(n_ap + n_ap * n_ap / n_bg), 1e-20)
+    return growth / total, total / uncertainty
+
+
+def _automatic_aperture(
+    values: np.ndarray,
+    saturated: np.ndarray,
+    refined: dict[int, tuple[float, float, float, float]],
+    candidate_indices: np.ndarray,
+    stars: list[CatalogStar],
+) -> tuple[float, tuple[float, ...], tuple[float, ...], int]:
+    """Choose one unbiased image-wide aperture from bright-star growth curves."""
+
+    radii = np.arange(1.5, 8.01, 0.5, dtype=np.float64)
+    curves: list[np.ndarray] = []
+    for index in sorted(candidate_indices, key=lambda item: stars[item].v_mag):
+        curve = _track_growth_curve(
+            values, saturated, *refined[int(index)], radii
+        )
+        if curve is not None and curve[1] >= 20.0:
+            curves.append(curve[0])
+        if len(curves) >= 60:
+            break
+    if len(curves) < 5:
+        raise ValueError(
+            "Automaticka apertura nema alespon 5 jasnych nesaturovanych hvezd "
+            "s S/N >= 20. Pouzijte rucni polomer."
+        )
+    median = np.median(np.vstack(curves), axis=0)
+    # Require 98.5 % of the flux represented by the tested range.  Two final
+    # steps must add less than 2.5 %, otherwise the curve has not plateaued.
+    if median[-1] - median[-3] > 0.025:
+        raise ValueError(
+            "Krivka rustu nedosahla do 8 px stabilniho plateau. "
+            "Zkontrolujte stopy hvezd nebo pouzijte rucni polomer."
+        )
+    reached = np.flatnonzero(median >= 0.985)
+    selected_index = int(reached[0]) if len(reached) else len(radii) - 1
+    selected_index = min(max(selected_index, 2), len(radii) - 1)
+    return (
+        float(radii[selected_index]),
+        tuple(float(value) for value in radii),
+        tuple(float(value) for value in median),
+        len(curves),
+    )
+
+
 def _saturation_cells(source: Path, result: AnalysisResult) -> np.ndarray:
     profile = result.profile
     with rawpy.imread(str(source)) as raw:
@@ -443,6 +542,7 @@ def measure_extinction(
     mode: str = "tracker",
     minimum_altitude_deg: float = 20.0,
     maximum_v_mag: float = 7.5,
+    aperture_mode: str = "auto",
     aperture_radius_px: float = 2.5,
     vignetting_calibration_path: str | Path | None = None,
     photometric_calibration_path: str | Path | None = None,
@@ -453,6 +553,8 @@ def measure_extinction(
     notify = progress or (lambda _message: None)
     if mode not in ("tracker", "fixed"):
         raise ValueError("Rezim musi byt 'tracker' nebo 'fixed'.")
+    if aperture_mode not in ("auto", "manual"):
+        raise ValueError("Rezim apertury musi byt 'auto' nebo 'manual'.")
     result = analyze_raw(
         light_path,
         dark_paths,
@@ -512,12 +614,13 @@ def measure_extinction(
     rms_deg = float(orientation_info.get("rms_deg", 1.0))
     search_px = max(3, min(24, int(math.ceil(max(1.2, 1.8 * rms_deg) * radius_scale * math.pi / 360.0))))
     initial_count = len(candidate_indices)
+    isolation_aperture = 8.0 if aperture_mode == "auto" else aperture_radius_px
     candidate_indices = _isolated_candidates(
         candidate_indices,
         x_mid,
         y_mid,
         stars,
-        exclusion_radius=2.0 * search_px + 2.5 * aperture_radius_px,
+        exclusion_radius=2.0 * search_px + 2.5 * isolation_aperture,
         stratify=altitude,
     )
     notify(
@@ -526,8 +629,8 @@ def measure_extinction(
     )
     if len(candidate_indices) < 10:
         raise ValueError("Po vylouceni katalogovych sousedu zustalo mene nez 10 hvezd.")
-    measurements: list[StarPhotometry] = []
     refined: dict[int, tuple[float, float, float, float]] = {}
+    refinement_radius = min(aperture_radius_px, 2.5) if aperture_mode == "manual" else 2.0
     for number, index in enumerate(candidate_indices, start=1):
         refined[index] = _refine_track(
             result.luminance_cd_m2,
@@ -535,18 +638,43 @@ def measure_extinction(
             float(y0[index]),
             float(x1[index]),
             float(y1[index]),
-            aperture_radius_px,
+            refinement_radius,
             search_px,
         )
         if number % 50 == 0:
             notify(f"Nalezeno {number}/{len(candidate_indices)} katalogovych poloh")
 
+    aperture_test_radii: tuple[float, ...] = ()
+    aperture_growth_curve: tuple[float, ...] = ()
+    aperture_calibration_stars = 0
+    if aperture_mode == "auto":
+        (
+            aperture_radius_px,
+            aperture_test_radii,
+            aperture_growth_curve,
+            aperture_calibration_stars,
+        ) = _automatic_aperture(
+            result.luminance_cd_m2,
+            saturation,
+            refined,
+            candidate_indices,
+            stars,
+        )
+        notify(
+            f"Automaticka apertura: {aperture_radius_px:g} px z "
+            f"{aperture_calibration_stars} jasnych hvezd"
+        )
+    else:
+        notify(f"Rucni apertura: {aperture_radius_px:g} px")
+
+    measurements: list[StarPhotometry] = []
     claimed_centers: list[tuple[float, float]] = []
     for index in sorted(candidate_indices, key=lambda item: stars[item].v_mag):
         star = stars[index]
         tx0, ty0, tx1, ty1 = refined[index]
         center_x, center_y = (tx0 + tx1) / 2.0, (ty0 + ty1) / 2.0
         trail_length = math.hypot(tx1 - tx0, ty1 - ty0)
+        trail_angle = math.degrees(math.atan2(ty1 - ty0, tx1 - tx0))
         reason = ""
         if any(
             math.hypot(center_x - other_x, center_y - other_y)
@@ -587,6 +715,8 @@ def measure_extinction(
                 instrumental_mag=instrumental,
                 used=instrumental is not None,
                 reason=reason,
+                aperture_radius_px=aperture_radius_px,
+                trail_angle_deg=trail_angle,
             )
         )
 
@@ -634,6 +764,11 @@ def measure_extinction(
         airmass_max=max(item.airmass for item in used),
         mid_exposure_utc=mid_utc,
         calibration_divisor_used=result.calibration_divisor_used,
+        aperture_mode=aperture_mode,
+        aperture_radius_px=aperture_radius_px,
+        aperture_test_radii_px=aperture_test_radii,
+        aperture_growth_curve=aperture_growth_curve,
+        aperture_calibration_stars=aperture_calibration_stars,
         measurements=final_measurements,
     )
 
@@ -711,9 +846,126 @@ def make_bouguer_plot(result: ExtinctionResult) -> Image.Image:
     return image
 
 
+def make_aperture_diagnostic(
+    preview: np.ndarray, result: ExtinctionResult
+) -> Image.Image:
+    """Make a pixel-level contact sheet and curve-of-growth aperture check."""
+
+    width, height = 800, 700
+    image = Image.new("RGB", (width, height), "#111111")
+    draw = ImageDraw.Draw(image)
+    mode = tr("automatická") if result.aperture_mode == "auto" else tr("ruční")
+    draw.text(
+        (20, 14),
+        tr("Kontrola fotometrických apertur")
+        + f" – {mode}, r = {result.aperture_radius_px:g} px",
+        fill="white",
+    )
+    source = Image.fromarray(np.asarray(preview, dtype=np.uint8), mode="L")
+    used = sorted(
+        (item for item in result.measurements if item.used),
+        key=lambda item: item.altitude_deg,
+    )
+    if len(used) > 12:
+        indices = np.linspace(0, len(used) - 1, 12).round().astype(int)
+        used = [used[int(index)] for index in indices]
+    tile_w, tile_h = 195, 145
+    image_side = 108
+    for number, item in enumerate(used):
+        column, row = number % 4, number // 4
+        tile_x, tile_y = 10 + column * tile_w, 46 + row * tile_h
+        half = max(
+            6,
+            int(math.ceil(item.aperture_radius_px + item.trail_length_px / 2.0 + 4.0)),
+        )
+        left = int(round(item.x)) - half
+        top = int(round(item.y)) - half
+        crop = source.crop((left, top, left + 2 * half + 1, top + 2 * half + 1))
+        crop = crop.resize((image_side, image_side), Image.Resampling.NEAREST).convert("RGB")
+        image.paste(crop, (tile_x, tile_y))
+        scale = image_side / (2 * half + 1)
+        cx = tile_x + (item.x - left) * scale
+        cy = tile_y + (item.y - top) * scale
+        radius = item.aperture_radius_px * scale
+        trail = item.trail_length_px * scale
+        angle = math.radians(item.trail_angle_deg)
+        dx, dy = math.cos(angle) * trail / 2.0, math.sin(angle) * trail / 2.0
+        p0, p1 = (cx - dx, cy - dy), (cx + dx, cy + dy)
+        if trail < 0.5:
+            draw.ellipse(
+                (cx - radius, cy - radius, cx + radius, cy + radius),
+                outline="#ffe34d",
+                width=2,
+            )
+        else:
+            nx, ny = -math.sin(angle) * radius, math.cos(angle) * radius
+            draw.line((p0[0] + nx, p0[1] + ny, p1[0] + nx, p1[1] + ny), fill="#ffe34d", width=2)
+            draw.line((p0[0] - nx, p0[1] - ny, p1[0] - nx, p1[1] - ny), fill="#ffe34d", width=2)
+            for px, py in (p0, p1):
+                draw.ellipse(
+                    (px - radius, py - radius, px + radius, py + radius),
+                    outline="#ffe34d",
+                    width=2,
+                )
+        draw.line((cx - 4, cy, cx + 4, cy), fill="#00ffff", width=1)
+        draw.line((cx, cy - 4, cx, cy + 4), fill="#00ffff", width=1)
+        draw.text(
+            (tile_x, tile_y + image_side + 4),
+            f"V {item.v_mag:.1f}  h {item.altitude_deg:.0f}°  r {item.aperture_radius_px:g}",
+            fill="#dddddd",
+        )
+
+    curve_top, curve_bottom = 510, 660
+    curve_left, curve_right = 65, 770
+    if result.aperture_test_radii_px and result.aperture_growth_curve:
+        draw.rectangle((curve_left, curve_top, curve_right, curve_bottom), outline="#888888")
+        radii = np.asarray(result.aperture_test_radii_px)
+        growth = np.asarray(result.aperture_growth_curve)
+
+        def curve_x(value: float) -> float:
+            return curve_left + (value - radii[0]) / (radii[-1] - radii[0]) * (curve_right - curve_left)
+
+        # Use a fixed 0.75–1.005 visible range while retaining labels as fractions.
+        def visible_y(value: float) -> float:
+            return curve_bottom - (np.clip(value, 0.75, 1.005) - 0.75) / 0.255 * (curve_bottom - curve_top)
+
+        points = [(curve_x(float(r)), visible_y(float(g))) for r, g in zip(radii, growth)]
+        draw.line(points, fill="#43c6ff", width=3)
+        threshold_y = visible_y(0.985)
+        draw.line((curve_left, threshold_y, curve_right, threshold_y), fill="#777777", width=1)
+        selected_x = curve_x(result.aperture_radius_px)
+        draw.line((selected_x, curve_top, selected_x, curve_bottom), fill="#ffe34d", width=2)
+        draw.text((curve_left, curve_top - 19), tr("Medián křivky růstu jasných hvězd"), fill="white")
+        draw.text((12, threshold_y - 7), "98.5%", fill="#bbbbbb")
+        for radius in radii[::2]:
+            x = curve_x(float(radius))
+            draw.text((x - 8, curve_bottom + 7), f"{radius:g}", fill="#cccccc")
+        draw.text((curve_right - 45, curve_bottom + 7), "r [px]", fill="#cccccc")
+    else:
+        draw.text(
+            (curve_left, curve_top + 30),
+            tr("Ruční režim – žlutá hranice ukazuje zadanou aperturu."),
+            fill="#dddddd",
+        )
+    return image
+
+
+def combine_extinction_preview(
+    bouguer: Image.Image, apertures: Image.Image
+) -> Image.Image:
+    combined = Image.new(
+        "RGB", (bouguer.width + apertures.width, max(bouguer.height, apertures.height)), "white"
+    )
+    combined.paste(bouguer, (0, 0))
+    combined.paste(apertures, (bouguer.width, 0))
+    return combined
+
+
 def save_extinction_result(
-    result: ExtinctionResult, output_dir: str | Path
-) -> tuple[Path, Path, Path]:
+    result: ExtinctionResult,
+    output_dir: str | Path,
+    aperture_diagnostic: Image.Image | None = None,
+) -> tuple[Path, ...]:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     stem = Path(result.source).stem
@@ -728,4 +980,9 @@ def save_extinction_result(
         writer.writeheader()
         writer.writerows(asdict(item) for item in result.measurements)
     make_bouguer_plot(result).save(plot_path)
-    return json_path, csv_path, plot_path
+    paths: tuple[Path, ...] = (json_path, csv_path, plot_path)
+    if aperture_diagnostic is not None:
+        aperture_path = output / f"{stem}_extinkce_apertury.png"
+        aperture_diagnostic.save(aperture_path)
+        paths += (aperture_path,)
+    return paths
