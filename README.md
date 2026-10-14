@@ -154,10 +154,13 @@ This mode determines cardinal directions and the full camera tilt:
 
 1. Enter the site's latitude and longitude in decimal degrees. North and east
    are positive, south and west negative.
-2. Select a bright star from the list.
+2. Select a bright star from the list. With the list focused, type the first
+   letter or several initial letters (`V`, `Ve`, …) to jump directly to Vega;
+   repeatedly pressing one letter cycles through stars with that initial.
 3. Move over it in the main preview. An unfiltered 8× magnifier appears.
 4. Click its centre in the magnifier. Fine-tune the point with the arrow keys
-   or displayed arrow buttons in 0.5-pixel steps.
+   or displayed arrow buttons in 0.5-pixel steps. `Shift+arrow` uses a
+   0.1-pixel step. The crosshair remains fixed while the image moves beneath it.
 5. Press **Add clicked star**.
 6. Add a second and preferably a third widely separated star.
 7. Press **Solve stars and save**.

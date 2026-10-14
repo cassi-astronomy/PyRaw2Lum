@@ -914,7 +914,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 "Přejeďte myší nad hlavním náhledem.\n"
                 "Kliknutím do lupy přesuňte hvězdu\n"
                 "přesně pod středový kříž.\n"
-                "Klávesy nebo tlačítka: krok 0,5 px"
+                "Šipky: krok 0,5 px · Shift+šipky: 0,1 px"
             ),
             justify="center",
             foreground="#555555",
@@ -949,21 +949,21 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             source_x = min(max(source_x, 0.0), preview_array.shape[1] - 1.0)
             source_y = min(max(source_y, 0.0), preview_array.shape[0] - 1.0)
             loupe_center["x"], loupe_center["y"] = source_x, source_y
-            half = loupe_pixels // 2
-            center_x, center_y = int(round(source_x)), int(round(source_y))
-            x0, y0 = center_x - half, center_y - half
-            x1, y1 = x0 + loupe_pixels, y0 + loupe_pixels
-            patch = np.zeros((loupe_pixels, loupe_pixels), dtype=np.uint8)
-            src_x0, src_y0 = max(0, x0), max(0, y0)
-            src_x1 = min(preview_array.shape[1], x1)
-            src_y1 = min(preview_array.shape[0], y1)
-            if src_x1 > src_x0 and src_y1 > src_y0:
-                patch[
-                    src_y0 - y0 : src_y1 - y0,
-                    src_x0 - x0 : src_x1 - x0,
-                ] = preview_array[src_y0:src_y1, src_x0:src_x1]
-            enlarged = Image.fromarray(patch, mode="L").resize(
-                (loupe_size, loupe_size), Image.Resampling.NEAREST
+            # Vzorkovani primo z celeho nahledu zachova i pulpixelovy posun.
+            # Kriz zustava uprostred a obraz hvezdy se pod nim viditelne posouva.
+            enlarged = source_image.transform(
+                (loupe_size, loupe_size),
+                Image.Transform.AFFINE,
+                (
+                    1.0 / loupe_zoom,
+                    0.0,
+                    source_x - loupe_size / (2.0 * loupe_zoom),
+                    0.0,
+                    1.0 / loupe_zoom,
+                    source_y - loupe_size / (2.0 * loupe_zoom),
+                ),
+                resample=Image.Resampling.NEAREST,
+                fillcolor=0,
             )
             loupe_photo = ImageTk.PhotoImage(enlarged)
             loupe_canvas.itemconfigure(loupe_image_id, image=loupe_photo)
@@ -1023,7 +1023,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             select_source(float(chosen["x"]) + dx, float(chosen["y"]) + dy)
 
         def nudge(event) -> str:
-            step = 0.5
+            step = 0.1 if event.state & 0x0001 else 0.5
             dx, dy = {
                 "Left": (-step, 0.0),
                 "Right": (step, 0.0),
@@ -1050,7 +1050,12 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         canvas.bind("<Motion>", track_for_loupe)
         loupe_canvas.bind("<Button-1>", choose_in_loupe)
         for key in ("Left", "Right", "Up", "Down"):
+            canvas.bind(f"<{key}>", nudge)
+            canvas.bind(f"<Shift-{key}>", nudge)
+            loupe_canvas.bind(f"<{key}>", nudge)
+            loupe_canvas.bind(f"<Shift-{key}>", nudge)
             dialog.bind(f"<{key}>", nudge, add="+")
+            dialog.bind(f"<Shift-{key}>", nudge, add="+")
         update_loupe(loupe_center["x"], loupe_center["y"])
         manual_box = ttk.LabelFrame(dialog, text="Jednoduchá orientace jedním směrem", padding=8)
         manual_box.pack(fill="x", padx=12, pady=(10, 4))
@@ -1126,6 +1131,43 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             width=38,
         )
         star_box.pack(side="left", padx=(4, 8), fill="x", expand=True)
+        star_labels = [star.label for star in BRIGHT_STARS]
+        typeahead = {"prefix": "", "last_time": 0}
+
+        def choose_star_by_typing(event) -> str | None:
+            if not event.char or not event.char.isprintable() or event.char.isspace():
+                return None
+            now = int(event.time)
+            prefix = (
+                typeahead["prefix"] + event.char
+                if now - int(typeahead["last_time"]) <= 1200
+                else event.char
+            ).casefold()
+            matches = [
+                index
+                for index, label in enumerate(star_labels)
+                if label.casefold().startswith(prefix)
+            ]
+            if not matches:
+                prefix = event.char.casefold()
+                matches = [
+                    index
+                    for index, label in enumerate(star_labels)
+                    if label.casefold().startswith(prefix)
+                ]
+            if matches:
+                current = star_box.current()
+                if len(prefix) == 1 and current in matches:
+                    selected = matches[(matches.index(current) + 1) % len(matches)]
+                else:
+                    selected = matches[0]
+                star_box.current(selected)
+                typeahead["prefix"] = prefix
+                typeahead["last_time"] = now
+                return "break"
+            return None
+
+        star_box.bind("<KeyPress>", choose_star_by_typing)
         match_list = tk.Listbox(astrometry_box, height=3)
         match_list.pack(fill="x", pady=(3, 4))
 

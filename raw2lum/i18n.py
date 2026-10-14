@@ -104,7 +104,7 @@ EN: dict[str, str] = {
     "Náhled nelze vytvořit": "Cannot create preview",
     "Klikněte na známý směr, nebo postupně na 2–3 vybrané jasné hvězdy. Astrometrie opraví také náklon fotoaparátu.": "Click a known direction, or successively click 2–3 selected bright stars. Astrometry also corrects camera tilt.",
     "Lupa 8×": "Magnifier 8×",
-    "Přejeďte myší nad hlavním náhledem.\nKliknutím do lupy přesuňte hvězdu\npřesně pod středový kříž.\nKlávesy nebo tlačítka: krok 0,5 px": "Move the mouse over the main preview.\nClick inside the magnifier to place the star\nexactly under the central crosshair.\nArrow keys or buttons: 0.5 px step",
+    "Přejeďte myší nad hlavním náhledem.\nKliknutím do lupy přesuňte hvězdu\npřesně pod středový kříž.\nŠipky: krok 0,5 px · Shift+šipky: 0,1 px": "Move the mouse over the main preview.\nClick inside the magnifier to place the star\nexactly under the central crosshair.\nArrows: 0.5 px · Shift+arrows: 0.1 px",
     "Jednoduchá orientace jedním směrem": "Simple orientation using one direction",
     "Označený směr:": "Marked direction:",
     "Sever (S)": "North (N)",

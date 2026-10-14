@@ -167,12 +167,16 @@ Tento režim určí světové strany i úplný náklon fotoaparátu.
 
 1. Zadejte zeměpisnou šířku a délku stanoviště v desetinných stupních.
    Severní a východní souřadnice jsou kladné, jižní a západní záporné.
-2. V seznamu vyberte jasnou hvězdu.
+2. V seznamu vyberte jasnou hvězdu. Když má seznam fokus, napište počáteční
+   písmeno nebo několik prvních písmen (`V`, `Ve`, …) a výběr přeskočí přímo
+   na Vegu. Opakovaným stiskem stejného písmene lze procházet hvězdy se stejnou
+   iniciálou.
 3. Přejeďte na její polohu v hlavním náhledu. Vpravo se zobrazí lupa 8×
    vytvořená z původních pixelů bez vyhlazování.
 4. Klikněte přímo do lupy na střed hvězdy; vybraný bod se přesune pod pevný
    středový kříž. Po kliknutí jej lze doladit klávesami nebo zobrazenými
-   tlačítky šipek, vždy o 0,5 pixelu.
+   tlačítky šipek po 0,5 pixelu; `Shift+šipka` použije krok 0,1 pixelu. Kříž
+   zůstává pevný a obraz hvězdy se viditelně posouvá pod ním.
 5. Stiskněte **Přidat kliknutou**.
 6. Stejným způsobem přidejte druhou a ideálně třetí hvězdu.
 7. Stiskněte **Vyřešit hvězdy a uložit**.
