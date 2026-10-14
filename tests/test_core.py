@@ -20,7 +20,11 @@ from raw2lum.core import (
 from raw2lum.color_analysis import compute_color_indices, summarize_color
 from raw2lum.palette import HOLLAN_LOG_PALETTE, NPS_PALETTE
 from raw2lum.profiles import CANON_600D_SIGMA_45, CANON_R6M2_SIGMA_45, profile_for_camera
-from raw2lum.rendering import fisheye_to_panorama, orient_image_north_up
+from raw2lum.rendering import (
+    fisheye_to_panorama,
+    orient_image_north_up,
+    reproject_fisheye_north_up,
+)
 from raw2lum.astrometry import (
     STAR_BY_LABEL,
     StarMatch,
@@ -173,6 +177,37 @@ class ConversionTests(unittest.TestCase):
         pixels[2, 4] = (255, 0, 0)  # sever je puvodne vpravo
         rotated = np.asarray(orient_image_north_up(Image.fromarray(pixels), 0.0))
         self.assertEqual(tuple(rotated[0, 2]), (255, 0, 0))
+
+    def test_star_reprojected_round_map_is_not_mirrored_east_west(self) -> None:
+        size = 32
+        yy, xx = np.indices((size, size), dtype=np.float32)
+        values = yy * 100.0 + xx
+        profile = SimpleNamespace(
+            crop_size=size,
+            focal_length_mm=1.0,
+            sensor_width_mm=2.0,
+            max_calibrated_radius=15.0,
+        )
+        result = SimpleNamespace(
+            profile=profile,
+            orientation_matrix=np.eye(3),
+            orientation_info={"projection_radius_scale": 16.0},
+        )
+        output = reproject_fisheye_north_up(values, result)
+        center, radius = size // 2, 4
+
+        # For a camera looking upward, a north-up round map is an overhead
+        # view: raw north (bottom here) moves to the top, while raw east
+        # (right here) moves to the left. This is a rotation, not a mirror.
+        self.assertEqual(
+            output[center - radius, center], values[center + radius, center]
+        )
+        self.assertEqual(
+            output[center, center - radius], values[center, center + radius]
+        )
+        self.assertEqual(
+            output[center, center + radius], values[center, center - radius]
+        )
 
     def test_three_stars_recover_full_camera_orientation(self) -> None:
         labels = [label for label in STAR_BY_LABEL if label.startswith(("Vega ", "Deneb ", "Altair "))]

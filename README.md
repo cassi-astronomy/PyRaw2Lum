@@ -180,8 +180,9 @@ For long exposures, mark approximately the centre of a short star trail. Star
 positions are calculated for mid-exposure rather than the EXIF start time.
 
 With a star solution, the circular map is resampled to the true zenith: north
-is up, east right, south down, and west left. The panorama has north at the
-centre and runs **S – W – N – E – S** from left to right. Its white line marks
+is up, east left, south down, and west right, as in an overhead view of the
+sky. The panorama uses the natural outward-facing horizon view, has north at
+the centre, and runs **S – W – N – E – S** from left to right. Its white line marks
 the mathematical horizon; a narrow calibrated strip remains below it so nearby
 objects and lights are not cut off.
 

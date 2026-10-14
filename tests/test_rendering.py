@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 from PIL import Image, ImageDraw
 
+import raw2lum.rendering as rendering
 from raw2lum.rendering import (
     _draw_altitude_circles,
     _draw_true_horizon_circle,
@@ -66,3 +67,19 @@ def test_altitude_grid_is_optional_and_requires_full_orientation() -> None:
             ImageDraw.Draw(disabled), result, 0, 0, 20, 20, 1
         )
         assert all(pixel == base for pixel in disabled.getdata())
+
+
+def test_round_map_compass_places_east_left_and_west_right(monkeypatch) -> None:
+    labels = []
+    monkeypatch.setattr(
+        rendering,
+        "_centered",
+        lambda _draw, xy, label, _font, _fill: labels.append((xy, label)),
+    )
+    image = Image.new("RGB", (140, 140), "black")
+    rendering._draw_compass_on_round_map(
+        ImageDraw.Draw(image), 20, 20, 100, 100, 20, language="en"
+    )
+    positions = {label: xy for xy, label in labels}
+    assert positions["E"][0] < positions["N"][0]
+    assert positions["W"][0] > positions["N"][0]

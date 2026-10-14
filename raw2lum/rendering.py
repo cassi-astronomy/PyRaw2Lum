@@ -195,14 +195,14 @@ def _draw_compass_on_round_map(
     _centered(
         draw,
         (map_left - border / 2.0, center_y - font_size / 2.0),
-        west,
+        east,
         font,
         "white",
     )
     _centered(
         draw,
         (map_left + map_width + border / 2.0, center_y - font_size / 2.0),
-        east,
+        west,
         font,
         "white",
     )
@@ -699,7 +699,12 @@ def reproject_fisheye_north_up(
         valid = radius <= result.profile.max_calibrated_radius
         zenith_distance = 2.0 * np.arcsin(np.clip(radius / radius_scale, 0.0, 1.0))
         image_angle = np.arctan2(dy, dx)
-        azimuth = image_angle + math.pi / 2.0
+        # A zenith map is viewed as the sky above the observer: with north at
+        # the top, east belongs on the left and west on the right. Reversing
+        # both image axes gives a proper rotation for a level camera; the old
+        # formula reversed only the vertical axis and therefore mirrored the
+        # result east-west.
+        azimuth = -image_angle - math.pi / 2.0
         world = np.vstack(
             (
                 np.sin(zenith_distance) * np.sin(azimuth),

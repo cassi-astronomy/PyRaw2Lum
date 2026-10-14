@@ -211,12 +211,14 @@ Při jednoduché orientaci se kruhová mapa pouze otočí bez vytváření mezib
 Při hvězdné orientaci se mapa geometricky převzorkuje do skutečného zenitu:
 
 - sever je nahoře,
-- východ vpravo,
+- východ vlevo,
 - jih dole,
-- západ vlevo,
+- západ vpravo,
 - nakloněný horizont se opraví.
 
-Panorama má sever uprostřed a pořadí zleva doprava **J – Z – S – V – J**.
+Kruhová mapa představuje pohled vzhůru na oblohu. Panorama používá přirozený
+pohled ven směrem k obzoru, má sever uprostřed a pořadí zleva doprava
+**J – Z – S – V – J**.
 Zenit je nahoře. Bílá čára označuje matematický horizont a pod ní zůstává úzký
 pás kalibrovaného obrazu, takže se neodříznou blízké objekty a světla.
 
