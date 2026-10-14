@@ -186,7 +186,9 @@ class ConversionTests(unittest.TestCase):
             crop_size=size,
             focal_length_mm=1.0,
             sensor_width_mm=2.0,
-            max_calibrated_radius=15.0,
+            # Deliberately smaller than the tested radius: presentation must
+            # retain real RAW pixels outside the vignetting calibration.
+            max_calibrated_radius=3.0,
         )
         result = SimpleNamespace(
             profile=profile,

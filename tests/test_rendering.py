@@ -7,7 +7,6 @@ import raw2lum.rendering as rendering
 from raw2lum.rendering import (
     _draw_altitude_circles,
     _draw_true_horizon_circle,
-    _smooth_calibrated_circle,
 )
 
 
@@ -19,16 +18,6 @@ def _result(orientation=True, horizon=True, altitudes=False):
         show_horizon_circle=horizon,
         show_altitude_circles=altitudes,
     )
-
-
-def test_calibrated_circle_gets_smooth_edge_without_cropping_inside() -> None:
-    source = Image.new("RGB", (20, 20), (255, 0, 0))
-    masked = _smooth_calibrated_circle(source, _result(), 1)
-
-    assert masked.getpixel((10, 10)) == (255, 0, 0)
-    assert masked.getpixel((0, 0)) == (0, 0, 0)
-    edge_red = masked.getpixel((10, 2))[0]
-    assert 0 < edge_red < 255
 
 
 def test_horizon_is_line_not_mask_and_requires_full_orientation() -> None:
@@ -53,13 +42,23 @@ def test_horizon_is_line_not_mask_and_requires_full_orientation() -> None:
     assert disabled.getpixel((10, 3)) == (120, 40, 20)
 
 
+def test_horizon_is_drawn_outside_vignetting_calibration_radius() -> None:
+    result = _result()
+    result.profile.max_calibrated_radius = 6.0
+    image = Image.new("RGB", (20, 20), (120, 40, 20))
+    _draw_true_horizon_circle(ImageDraw.Draw(image), result, 0, 0, 20, 20, 1)
+    assert any(pixel != (120, 40, 20) for pixel in image.getdata())
+
+
 def test_altitude_grid_is_optional_and_requires_full_orientation() -> None:
     base = (120, 40, 20)
     enabled = Image.new("RGB", (20, 20), base)
     _draw_altitude_circles(
         ImageDraw.Draw(enabled), _result(altitudes=True), 0, 0, 20, 20, 1
     )
-    assert any(pixel != base for pixel in enabled.getdata())
+    colors = set(enabled.getdata())
+    assert (0, 0, 0) in colors
+    assert (255, 255, 255) in colors
 
     for result in (_result(altitudes=False), _result(False, altitudes=True)):
         disabled = Image.new("RGB", (20, 20), base)

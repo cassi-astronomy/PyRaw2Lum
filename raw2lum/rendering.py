@@ -74,27 +74,6 @@ def orient_image_north_up(
     )
 
 
-def _smooth_calibrated_circle(
-    image: Image.Image,
-    result: AnalysisResult,
-    display_scale: int,
-) -> Image.Image:
-    """Apply an anti-aliased edge only at the calibrated image-circle limit."""
-
-    radius = result.profile.max_calibrated_radius * display_scale
-    supersampling = 2
-    mask = Image.new(
-        "L", (image.width * supersampling, image.height * supersampling), 0
-    )
-    draw = ImageDraw.Draw(mask)
-    cx = image.width * supersampling / 2.0
-    cy = image.height * supersampling / 2.0
-    rr = radius * supersampling
-    draw.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=255)
-    mask = mask.resize(image.size, Image.Resampling.LANCZOS)
-    return Image.composite(image, Image.new("RGB", image.size, "black"), mask)
-
-
 def _draw_true_horizon_circle(
     draw: ImageDraw.ImageDraw,
     result: AnalysisResult,
@@ -113,15 +92,19 @@ def _draw_true_horizon_circle(
     ):
         return
     radius = math.sin(math.pi / 4.0) * _projection_radius_scale(result) * display_scale
-    calibrated = result.profile.max_calibrated_radius * display_scale
-    if not math.isfinite(radius) or radius <= 0 or radius >= calibrated:
+    # The horizon may lie just outside the radius with calibrated vignetting.
+    # It is still geometrically valid and can be drawn over the retained RAW
+    # pixels or the surrounding frame. Suppress it only when it cannot
+    # intersect the square map at all.
+    visible_limit = math.hypot(map_width / 2.0, map_height / 2.0)
+    if not math.isfinite(radius) or radius <= 0 or radius > visible_limit:
         return
     cx = map_left + map_width / 2.0
     cy = map_top + map_height / 2.0
     bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
     # Dark halo keeps the neutral line readable over every palette colour.
-    draw.ellipse(bounds, outline=(20, 20, 20), width=max(2, display_scale * 2))
-    draw.ellipse(bounds, outline=(225, 225, 225), width=max(1, display_scale))
+    draw.ellipse(bounds, outline=(0, 0, 0), width=max(3, display_scale * 3))
+    draw.ellipse(bounds, outline=(255, 255, 255), width=max(1, display_scale))
 
 
 def _draw_altitude_circles(
@@ -140,7 +123,7 @@ def _draw_altitude_circles(
     ):
         return
     scale = _projection_radius_scale(result) * display_scale
-    calibrated = result.profile.max_calibrated_radius * display_scale
+    visible_limit = math.hypot(map_width / 2.0, map_height / 2.0)
     cx = map_left + map_width / 2.0
     cy = map_top + map_height / 2.0
     line_width = max(1, display_scale)
@@ -148,27 +131,32 @@ def _draw_altitude_circles(
     for altitude_deg in range(10, 90, 10):
         zenith_distance = math.radians(90.0 - altitude_deg)
         radius = math.sin(zenith_distance / 2.0) * scale
-        if not math.isfinite(radius) or radius <= 0 or radius >= calibrated:
+        if not math.isfinite(radius) or radius <= 0 or radius > visible_limit:
             continue
         bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
-        draw.ellipse(bounds, outline=(175, 175, 175), width=line_width)
+        draw.ellipse(bounds, outline=(0, 0, 0), width=max(3, display_scale * 3))
+        draw.ellipse(bounds, outline=(255, 255, 255), width=line_width)
         label = f"{altitude_deg}°"
         box = draw.textbbox((0, 0), label, font=font)
         diagonal = radius / math.sqrt(2.0)
         label_x = cx + diagonal - (box[2] - box[0]) - 2 * display_scale
         label_y = cy - diagonal - (box[3] - box[1]) / 2.0
         draw.text(
-            (label_x + display_scale, label_y + display_scale),
+            (label_x, label_y),
             label,
             font=font,
-            fill=(20, 20, 20),
+            fill=(255, 255, 255),
+            stroke_width=max(1, display_scale),
+            stroke_fill=(0, 0, 0),
         )
-        draw.text((label_x, label_y), label, font=font, fill=(225, 225, 225))
 
     # Altitude 90° is a point, not a circle.
     arm = max(3, 3 * display_scale)
-    draw.line((cx - arm, cy, cx + arm, cy), fill=(225, 225, 225), width=line_width)
-    draw.line((cx, cy - arm, cx, cy + arm), fill=(225, 225, 225), width=line_width)
+    halo_width = max(3, display_scale * 3)
+    draw.line((cx - arm, cy, cx + arm, cy), fill=(0, 0, 0), width=halo_width)
+    draw.line((cx, cy - arm, cx, cy + arm), fill=(0, 0, 0), width=halo_width)
+    draw.line((cx - arm, cy, cx + arm, cy), fill=(255, 255, 255), width=line_width)
+    draw.line((cx, cy - arm, cx, cy + arm), fill=(255, 255, 255), width=line_width)
 
 
 def _draw_compass_on_round_map(
@@ -225,7 +213,6 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.NEAREST,
         )
-    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -331,7 +318,6 @@ def render_luminance_map(
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.NEAREST,
         )
-    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -526,7 +512,6 @@ def render_blue_fraction_map(
             (map_image.width * display_scale, map_image.height * display_scale),
             resample=Image.Resampling.BILINEAR,
         )
-    map_image = _smooth_calibrated_circle(map_image, result, display_scale)
 
     border = max(42, int(map_image.width * 0.028))
     width = map_image.width + 2 * border
@@ -668,8 +653,7 @@ def _sample_camera_vectors(
     src_x = np.rint(src_w / 2.0 + radius * np.cos(angle)).astype(np.int32)
     src_y = np.rint(src_h / 2.0 + radius * np.sin(angle)).astype(np.int32)
     valid = (
-        (radius <= result.profile.max_calibrated_radius)
-        & (src_x >= 0)
+        (src_x >= 0)
         & (src_x < src_w)
         & (src_y >= 0)
         & (src_y < src_h)
@@ -696,7 +680,10 @@ def reproject_fisheye_north_up(
         dx = x - center_x
         dy = row - center_y
         radius = np.hypot(dx, dy)
-        valid = radius <= result.profile.max_calibrated_radius
+        # Keep every geometrically representable output point. The former
+        # max_calibrated_radius cut created an artificial circular mask and
+        # hid real trees/lights present in the RAW image.
+        valid = radius <= radius_scale
         zenith_distance = 2.0 * np.arcsin(np.clip(radius / radius_scale, 0.0, 1.0))
         image_angle = np.arctan2(dy, dx)
         # A zenith map is viewed as the sky above the observer: with north at

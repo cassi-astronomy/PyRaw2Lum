@@ -227,13 +227,15 @@ Zenit je nahoře. Bílá čára označuje matematický horizont a pod ní zůst�
 pás kalibrovaného obrazu, takže se neodříznou blízké objekty a světla.
 
 Stejné pravidlo používají kruhové mapy MSA, luminance i barvy. Volitelná tenká
-neutrálně šedá kružnice s tmavým lemem označuje skutečnou výšku 0°. Nejde o
-masku: kalibrovaný pás pod kružnicí zůstává zobrazený. Druhá volitelná vrstva
-přidá kružnice ve výškách 10°, 20°, …, 80° a značku zenitu v 90°. Obě vrstvy
-se počítají pouze po úplném řešení z více hvězd, protože jediný světový směr
-nedokáže určit náklon fotoaparátu. Hladký vnější okraj je hranice kalibrovaného
-obrazového kruhu objektivu, nikoli obzor. Horizont je ve výchozím nastavení zapnutý,
-výšková síť vypnutá.
+černobílá kontrastní kružnice označuje skutečnou výšku 0°. Nejde o masku:
+zůstane zobrazený celý dostupný čtvercový výřez RAWu včetně stromů, budov a
+světel za poloměrem kalibrované vinětace. Tyto vnější pixely zachovávají obrazový
+kontext, ale nemají zaručenou přesnost absolutní fotometrie. Druhá volitelná
+vrstva přidá bílé kružnice s černým lemem ve výškách 10°, 20°, …, 80° a značku
+zenitu v 90°. Obě vrstvy se počítají pouze po úplném řešení z více hvězd,
+protože jediný světový směr nedokáže určit náklon fotoaparátu. Umělá kruhová
+maska se nepoužívá. Horizont je ve výchozím nastavení zapnutý, výšková síť
+vypnutá.
 
 ## Experimentální barva oblohy z RAW RGB
 

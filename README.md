@@ -190,13 +190,16 @@ the mathematical horizon; a narrow calibrated strip remains below it so nearby
 objects and lights are not cut off.
 
 The circular MSA, luminance, and colour maps follow the same rule. An optional
-thin neutral-grey line with a dark halo marks true altitude 0°. It is not a
-mask: the calibrated strip below the line remains visible. A second optional
-overlay adds circles at altitudes 10°, 20°, …, 80° and marks the 90° zenith.
+high-contrast black-and-white line marks true altitude 0°. It is not a mask:
+the complete available square RAW crop remains visible, including trees,
+buildings, and lights outside the radius covered by the vignetting calibration.
+Those outer pixels provide visual context but do not have guaranteed absolute
+photometric accuracy. A second optional overlay adds black-edged white circles
+at altitudes 10°, 20°, …, 80° and marks the 90° zenith.
 Both overlays are calculated only after a full multi-star solution because a
-single compass direction cannot determine camera tilt. The outer smooth edge
-is the limit of the calibrated lens image circle, not the horizon. The horizon
-overlay is enabled by default; the altitude grid is disabled by default.
+single compass direction cannot determine camera tilt. No artificial circular
+image mask is applied. The horizon overlay is enabled by default; the altitude
+grid is disabled by default.
 
 ## Experimental RAW sky colour
 

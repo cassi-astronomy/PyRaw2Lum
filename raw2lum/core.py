@@ -472,13 +472,10 @@ def analyze_raw(
          light[1::2, 0::2] >= white_level * 0.98,
          light[1::2, 1::2] >= white_level * 0.98]
     )
-    height, width = luminance.shape
-    yy, xx = np.indices(luminance.shape, dtype=np.float64)
-    calibrated_circle = (
-        np.hypot(xx - width / 2.0, yy - height / 2.0)
-        <= profile.max_calibrated_radius
-    )
-    color_valid = calibrated_circle & ~color_saturated
+    # Pixels outside the vignetting-calibrated radius remain useful for visual
+    # context (trees, buildings, nearby lights). Keep them instead of applying
+    # an artificial circular mask; their absolute photometry is not guaranteed.
+    color_valid = ~color_saturated
     blue_fraction, blue_green_ratio, red_green_ratio = compute_color_indices(
         relative_red, relative_green, relative_blue, color_valid
     )
