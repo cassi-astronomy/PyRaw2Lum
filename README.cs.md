@@ -2,7 +2,7 @@
 
 [English](README.md) | **Česky**
 
-PyRaw2Lum převádí celooblohové DSLR RAW snímky na absolutně kalibrované mapy
+PyRaw2Lum převádí DSLR RAW snímky na mapy
 jasu oblohy v **mag/arcsec² (MSA)** a **cd/m²**. Navazuje na program
 `raw2lum 1.35` Jana Hollana a zachovává jeho kalibraci, barevné stupnice,
 RGB poměry a korekci vinětace.
@@ -29,8 +29,10 @@ R6 má větší pixely, takže stejný fyzický obrazový kruh objektivu zabír�
 výřez a Bayerovu masku; snímky obou fotoaparátů se neporovnávají pixel proti
 pixelu.
 
-Program neznámou sestavu nebo jinou clonu odmítne. Zabraňuje tak vytvoření
-věrohodně vypadajícího, ale fyzikálně nesprávného výsledku.
+V kalibrovaném režimu rybího oka program neznámou sestavu nebo jinou clonu
+odmítne. Obdélníkovou mapu lze vytvořit i s jiným objektivem na podporovaném
+těle, ale do doplnění odpovídajícího hvězdného nulového bodu a profilu vinětace
+je výslovně označená jako experimentální.
 
 ## Co program umí
 
@@ -64,6 +66,9 @@ věrohodně vypadajícího, ale fyzikálně nesprávného výsledku.
 - experimentálně vytvořit absolutní profil sestavy z hvězdné fotometrie a
   Bouguerova fitu,
 - automaticky vyřešit WCS snímku z 30mm, 50mm či delšího objektivu přes ASTAP,
+- vytvořit nezkreslenou obdélníkovou mapu z běžného objektivu (např. 20–50 mm),
+- do obdélníkové mapy volitelně zakreslit skutečnou síť výšky a azimutu po 10°,
+- korigovat změnu prostorového úhlu pixelu u rektilineárního objektivu,
 - uložit přesná numerická pole a podrobný JSON report.
 
 Zpracování funguje offline. Malý katalog jasných hvězd pro ruční orientaci i
@@ -101,13 +106,30 @@ se vytvářejí také nadpisy, světové strany, popisy legend a diagnostické g
 3. Do seznamu **Dark RAW snímky** přidejte všechny dostupné darky. Mohou být
    pořízené různými expozičními časy.
 4. Vyberte časovou zónu, ve které byly nastavené hodiny fotoaparátu.
-5. Volitelně nastavte každému lightu orientaci tlačítkem **Orientace…**.
-6. Zvolte výstupní složku a velikost PNG. Podle potřeby zapněte matematický
-   horizont a/nebo výškové kružnice po 10° v kruhových mapách.
-7. Stiskněte **Spustit zpracování**.
+5. Zvolte geometrii **automaticky**, **rybí oko** nebo **obdélníková mapa**.
+   Automatika volí obdélník při ohnisku nad 10 mm nebo při připojeném WCS.
+6. U běžného objektivu vyberte jeden light a stiskněte **ASTAP WCS…**. Zadejte
+   zeměpisnou šířku a délku; vyřešené WCS se přiřadí právě tomuto lightu.
+7. Zvolte výstupní složku a velikost PNG. Podle potřeby zapněte horizont
+   a/nebo souřadnicovou síť po 10°.
+8. Stiskněte **Spustit zpracování**.
 
 Lighty i darky lze přetahovat přímo z Průzkumníku Windows. Cesty obsahující
 mezery jsou podporované.
+
+## Běžné objektivy a obdélníkové mapy
+
+Snímek z 20mm, 30mm nebo 50mm objektivu zůstává klasickým obdélníkem. Program
+jej nenutí do celooblohového kruhu ani panoramatu a neodřízne objekty pod
+matematickým horizontem. Bez astrometrie vytvoří prostou jasovou mapu v původní
+geometrii. Po vyřešení přes ASTAP dokáže z WCS, času a polohy zakreslit skutečný
+horizont a síť výšky a azimutu po 10°. Naměřené pixely se přitom nedeformují.
+
+WCS určuje směr a prostorový úhel pixelu, nikoli citlivost fotoaparátu ani
+propustnost objektivu. Pro návaznou absolutní stupnici MSA a cd/m² u nové
+sestavy je proto stále nutná odpovídající hvězdná fotometrická kalibrace a
+změřený profil vinětace. Bez nich je obdélníkový výstup experimentální relativní
+mapou a jeho absolutní nulový bod nelze považovat za laboratorně kalibrovaný.
 
 ## Lighty, darky a expoziční údaje
 

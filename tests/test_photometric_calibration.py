@@ -21,7 +21,7 @@ class StarCalibrationTests(unittest.TestCase):
         profile = CANON_600D_SIGMA_45
         used_divisor = 97.0
         expected_divisor = 123.4
-        pitch_mm = profile.sensor_width_mm * 2.0 / profile.crop_size
+        pitch_mm = profile.sensor_width_mm * 2.0 / profile.input_width
         solid_angle = (pitch_mm / profile.focal_length_mm) ** 2
         measured_sum = (
             expected_divisor

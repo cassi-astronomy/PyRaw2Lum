@@ -8,6 +8,15 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+from astropy.time import Time
+from astropy.wcs import WCS
+from astropy.io import fits
+import astropy.units as u
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+
 from .core import AnalysisResult, msa_to_luminance
 from .i18n import tr
 from .palette import (
@@ -72,6 +81,107 @@ def orient_image_north_up(
         expand=False,
         fillcolor=(0, 0, 0),
     )
+
+
+def _is_rectilinear(result: AnalysisResult) -> bool:
+    return getattr(result, "projection_mode", "fisheye_equisolid") == "rectilinear"
+
+
+def _wcs_for_result(result: AnalysisResult) -> WCS | None:
+    solution = getattr(result, "wcs_solution", None)
+    if not solution or not solution.get("wcs_header"):
+        return None
+    header = fits.Header()
+    for key, value in solution["wcs_header"].items():
+        try:
+            header[str(key)] = value
+        except (TypeError, ValueError):
+            continue
+    return WCS(header).celestial
+
+
+def _draw_wcs_altaz_grid(
+    draw: ImageDraw.ImageDraw,
+    result: AnalysisResult,
+    map_left: int,
+    map_top: int,
+    map_width: int,
+    map_height: int,
+    display_scale: int,
+) -> None:
+    """Draw a true Alt/Az grid on an unchanged rectilinear image."""
+
+    wcs = _wcs_for_result(result)
+    solution = getattr(result, "wcs_solution", None)
+    if (
+        wcs is None
+        or solution is None
+        or result.site_latitude_deg is None
+        or result.site_longitude_deg is None
+        or not result.captured_at_utc
+    ):
+        return
+    try:
+        obstime = Time(result.captured_at_utc.replace(" UTC", ""), scale="utc")
+        location = EarthLocation.from_geodetic(
+            result.site_longitude_deg * u.deg,
+            result.site_latitude_deg * u.deg,
+        )
+    except Exception:
+        return
+    full_width = float(solution.get("width_px", result.msa.shape[1] * 2))
+    full_height = float(solution.get("height_px", result.msa.shape[0] * 2))
+    sx, sy = map_width / full_width, map_height / full_height
+    frame = AltAz(obstime=obstime, location=location)
+    halo_width = max(2, display_scale * 2)
+    line_width = max(1, display_scale)
+    font = _font(max(9, 7 * display_scale))
+
+    def draw_curve(altitudes, azimuths, label: str) -> None:
+        sky = SkyCoord(alt=np.asarray(altitudes) * u.deg, az=np.asarray(azimuths) * u.deg, frame=frame).icrs
+        x, y = wcs.world_to_pixel(sky)
+        x = map_left + np.asarray(x) * sx
+        y = map_top + np.asarray(y) * sy
+        valid = np.isfinite(x) & np.isfinite(y) & (
+            (x >= map_left) & (x < map_left + map_width) &
+            (y >= map_top) & (y < map_top + map_height)
+        )
+        segments: list[list[tuple[float, float]]] = []
+        current: list[tuple[float, float]] = []
+        previous = None
+        for px, py, good in zip(x, y, valid):
+            point = (float(px), float(py))
+            jump = previous is not None and math.hypot(point[0] - previous[0], point[1] - previous[1]) > max(map_width, map_height) / 8
+            if good and not jump:
+                current.append(point)
+            else:
+                if len(current) > 1:
+                    segments.append(current)
+                current = [point] if good else []
+            previous = point if good else None
+        if len(current) > 1:
+            segments.append(current)
+        for segment in segments:
+            draw.line(segment, fill=(0, 0, 0), width=halo_width, joint="curve")
+            draw.line(segment, fill=(120, 220, 255), width=line_width, joint="curve")
+        if segments:
+            segment = max(segments, key=len)
+            px, py = segment[len(segment) // 2]
+            draw.text(
+                (px + 2, py + 2), label, font=font, fill=(160, 235, 255),
+                stroke_width=max(1, display_scale), stroke_fill=(0, 0, 0),
+            )
+
+    if getattr(result, "show_horizon_circle", True):
+        az = np.linspace(0.0, 360.0, 721)
+        draw_curve(np.zeros_like(az), az, "0°")
+    if getattr(result, "show_altitude_circles", False):
+        az = np.linspace(0.0, 360.0, 721)
+        for altitude in range(10, 90, 10):
+            draw_curve(np.full_like(az, float(altitude)), az, f"{altitude}°")
+        alt = np.linspace(0.0, 90.0, 361)
+        for azimuth in range(0, 360, 10):
+            draw_curve(alt, np.full_like(alt, float(azimuth)), f"{azimuth}°")
 
 
 def _round_map_north_angle(result: AnalysisResult) -> float | None:
@@ -288,7 +398,8 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     # Preserve the original RAW geometry in round maps. Full zenith reprojection
     # bends trees and buildings into artificial arcs when the camera is tilted.
     map_image = Image.fromarray(result.color_map, mode="RGB")
-    map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
+    if not _is_rectilinear(result):
+        map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
     if display_scale != 1:
         map_image = map_image.resize(
             (map_image.width * display_scale, map_image.height * display_scale),
@@ -304,7 +415,9 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     canvas = Image.new("RGB", (width, top + framed_height + footer), "black")
     canvas.paste(map_image, (map_left, map_top))
     draw = ImageDraw.Draw(canvas)
-    if result.north_angle_deg is not None or result.orientation_matrix is not None:
+    if not _is_rectilinear(result) and (
+        result.north_angle_deg is not None or result.orientation_matrix is not None
+    ):
         _draw_compass_on_round_map(
             draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
@@ -326,6 +439,10 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
         map_image.height,
         display_scale,
     )
+    if _is_rectilinear(result):
+        _draw_wcs_altaz_grid(
+            draw, result, map_left, map_top, map_image.width, map_image.height, display_scale
+        )
 
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
@@ -334,8 +451,11 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     title = tr("Mapa jasu oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
+    if not getattr(result, "absolute_calibrated", True):
+        title += f" · {tr('EXPERIMENTÁLNÍ NULOVÝ BOD', result.language)}"
     _centered(draw, (width / 2, top * 0.19), title, title_font, "white")
-    subtitle = f"{tr('Zenit', result.language)}: {result.zenith_msa:.2f} mag/arcsec²"
+    reference = tr("Střed pole", result.language) if _is_rectilinear(result) else tr("Zenit", result.language)
+    subtitle = f"{reference}: {result.zenith_msa:.2f} mag/arcsec²"
     _centered(draw, (width / 2, top * 0.62), subtitle, normal_font, (220, 220, 220))
 
     legend_top = top + framed_height + max(35, int(width * 0.014))
@@ -388,7 +508,8 @@ def render_luminance_map(
     output_path = Path(output_path)
     rgb = colorize_hollan_luminance(result.luminance_cd_m2)
     map_image = Image.fromarray(rgb, mode="RGB")
-    map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
+    if not _is_rectilinear(result):
+        map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
     if display_scale != 1:
         map_image = map_image.resize(
             (map_image.width * display_scale, map_image.height * display_scale),
@@ -404,7 +525,9 @@ def render_luminance_map(
     canvas = Image.new("RGB", (width, top + framed_height + footer), "black")
     canvas.paste(map_image, (map_left, map_top))
     draw = ImageDraw.Draw(canvas)
-    if result.north_angle_deg is not None or result.orientation_matrix is not None:
+    if not _is_rectilinear(result) and (
+        result.north_angle_deg is not None or result.orientation_matrix is not None
+    ):
         _draw_compass_on_round_map(
             draw, map_left, map_top, map_image.width, map_image.height, border, result.language
         )
@@ -426,6 +549,10 @@ def render_luminance_map(
         map_image.height,
         display_scale,
     )
+    if _is_rectilinear(result):
+        _draw_wcs_altaz_grid(
+            draw, result, map_left, map_top, map_image.width, map_image.height, display_scale
+        )
     title_font = _font(max(30, int(width * 0.015)), bold=True)
     normal_font = _font(max(20, int(width * 0.009)))
     tick_font = _font(max(17, int(width * 0.0075)))
@@ -434,8 +561,11 @@ def render_luminance_map(
     title = tr("Mapa luminance oblohy", result.language)
     if result.location:
         title += f" – {result.location}"
+    if not getattr(result, "absolute_calibrated", True):
+        title += f" · {tr('EXPERIMENTÁLNÍ NULOVÝ BOD', result.language)}"
     _centered(draw, (width / 2, top * 0.19), title, title_font, "white")
-    subtitle = f"{tr('Zenit', result.language)}: {result.zenith_cd_m2:.7f} cd/m²"
+    reference = tr("Střed pole", result.language) if _is_rectilinear(result) else tr("Zenit", result.language)
+    subtitle = f"{reference}: {result.zenith_cd_m2:.7f} cd/m²"
     _centered(draw, (width / 2, top * 0.62), subtitle, normal_font, (220, 220, 220))
 
     legend_top = top + framed_height + max(82, int(width * 0.032))

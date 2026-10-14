@@ -2,7 +2,7 @@
 
 **English** | [Česky](README.cs.md)
 
-PyRaw2Lum converts all-sky DSLR RAW images into absolutely calibrated sky
+PyRaw2Lum converts DSLR RAW images into sky
 brightness maps in **mag/arcsec² (MSA)** and **cd/m²**. It continues Jan
 Hollan's `raw2lum 1.35` project and preserves its calibration, colour scales,
 RGB ratios, and vignetting correction.
@@ -28,8 +28,10 @@ The R6 has larger pixels, so the same physical lens image circle spans about
 own centre, crop, and Bayer pattern; images from the two cameras are not
 compared pixel by pixel.
 
-PyRaw2Lum rejects an unknown setup or a different aperture. This prevents a
-plausible-looking but physically invalid result.
+For the calibrated fisheye mode, PyRaw2Lum rejects an unknown setup or a
+different aperture. A rectangular map may be generated for another lens on a
+supported body, but it is explicitly marked experimental until a matching
+stellar zero point and vignetting profile are available.
 
 ## Features
 
@@ -63,6 +65,9 @@ plausible-looking but physically invalid result.
   vignetting profiles,
 - experimental absolute stellar calibration from a Bouguer fit,
 - automatic WCS solving for 30 mm, 50 mm, and longer lenses through ASTAP,
+- rectangular, non-warped maps for ordinary lenses (for example 20–50 mm),
+- an optional true Alt/Az grid at 10° intervals on an ASTAP-solved rectangle,
+- rectilinear pixel-solid-angle correction for extended-sky radiance,
 - exact numerical arrays and a detailed JSON report.
 
 Normal processing works offline. Both the small bright-star catalogue for
@@ -100,13 +105,32 @@ scientific units and data filenames remain unchanged.
 3. Add all available files to **Dark RAW images**. They may use different
    exposure times.
 4. Select the time zone in which the camera clock was set.
-5. Optionally set the orientation of each light with **Orientation…**.
-6. Select an output folder and PNG size. If desired, enable the mathematical
-   horizon and/or 10° altitude circles for the round maps.
-7. Press **Start processing**.
+5. Choose **automatic**, **fisheye**, or **rectangular map** geometry. Automatic
+   mode selects the rectangle above 10 mm focal length or when WCS is attached.
+6. For an ordinary lens, select one light and press **ASTAP WCS…**. Enter the
+   observing latitude and longitude; the solved WCS is attached to that light.
+7. Select an output folder and PNG size. If desired, enable the horizon and/or
+   the 10° coordinate grid.
+8. Press **Start processing**.
 
 Lights and darks can be dragged directly from Windows File Explorer. Paths
 containing spaces are supported.
+
+## Ordinary lenses and rectangular maps
+
+A 20 mm, 30 mm, or 50 mm image is kept as an ordinary rectangle. PyRaw2Lum
+does not force it into an all-sky circle or panorama and does not crop away
+objects below the mathematical horizon. With no astrometric solution it
+produces a plain brightness map in the original geometry. With ASTAP WCS,
+capture time, and site coordinates it can overlay the true horizon and an
+altitude/azimuth grid every 10°. The pixels themselves are never warped.
+
+WCS determines direction and pixel solid angle; it does not calibrate camera
+sensitivity or lens transmission. Traceable absolute MSA and cd/m² for a new
+camera/lens/aperture combination therefore still require a matching stellar
+photometric calibration and a measured vignetting profile. Without those,
+the rectangular output is useful as an experimental relative map, but its
+absolute zero point must not be treated as laboratory calibrated.
 
 ## Lights, darks, and exposure metadata
 

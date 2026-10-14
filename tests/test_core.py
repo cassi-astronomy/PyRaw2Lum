@@ -16,10 +16,16 @@ from raw2lum.core import (
     exposure_normalization_factor,
     luminance_to_msa,
     msa_to_luminance,
+    _rectilinear_solid_angle_correction,
 )
 from raw2lum.color_analysis import compute_color_indices, summarize_color
 from raw2lum.palette import HOLLAN_LOG_PALETTE, NPS_PALETTE
-from raw2lum.profiles import CANON_600D_SIGMA_45, CANON_R6M2_SIGMA_45, profile_for_camera
+from raw2lum.profiles import (
+    CANON_600D_SIGMA_45,
+    CANON_R6M2_SIGMA_45,
+    profile_for_camera,
+    rectilinear_profile,
+)
 from raw2lum.rendering import (
     fisheye_to_panorama,
     orient_image_north_up,
@@ -65,6 +71,22 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(profile.crop_size, 2072)
         self.assertLess(profile.crop_size, CANON_600D_SIGMA_45.crop_size)
         self.assertEqual(profile.output_size, 1036)
+
+    def test_rectilinear_profile_preserves_full_rectangular_sensor(self) -> None:
+        profile = rectilinear_profile(
+            "Canon EOS 600D", "20 mm lens", 20.0, 2.8, 5184, 3456
+        )
+        self.assertEqual(profile.projection, "rectilinear")
+        self.assertEqual((profile.input_width, profile.input_height), (5184, 3456))
+        self.assertEqual((profile.output_width, profile.output_height), (2592, 1728))
+
+    def test_rectilinear_pixel_solid_angle_is_corrected_towards_corners(self) -> None:
+        profile = rectilinear_profile(
+            "Canon EOS 600D", "20 mm lens", 20.0, 2.8, 5184, 3456
+        )
+        correction = _rectilinear_solid_angle_correction(profile, (120, 180))
+        self.assertAlmostEqual(float(correction[59, 89]), 1.0, places=3)
+        self.assertGreater(float(correction[0, 0]), 1.2)
 
     def test_msa_round_trip(self) -> None:
         expected = np.array([17.5, 20.0, 22.0])

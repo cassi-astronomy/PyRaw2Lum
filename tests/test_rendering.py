@@ -2,6 +2,10 @@ from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image, ImageDraw
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+from astropy.time import Time
+from astropy.wcs import WCS
+import astropy.units as u
 
 import raw2lum.rendering as rendering
 from raw2lum.rendering import (
@@ -99,3 +103,35 @@ def test_round_map_compass_places_east_left_and_west_right(monkeypatch) -> None:
     positions = {label: xy for xy, label in labels}
     assert positions["E"][0] < positions["N"][0]
     assert positions["W"][0] > positions["N"][0]
+
+
+def test_rectilinear_wcs_grid_draws_without_masking_image() -> None:
+    time = Time("2026-09-15 20:35:36", scale="utc")
+    location = EarthLocation.from_geodetic(15 * u.deg, 50 * u.deg)
+    centre = SkyCoord(alt=45 * u.deg, az=180 * u.deg, frame=AltAz(
+        obstime=time, location=location
+    )).icrs
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [100.0, 60.0]
+    wcs.wcs.cdelt = [-0.4, 0.4]
+    wcs.wcs.crval = [centre.ra.deg, centre.dec.deg]
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    result = SimpleNamespace(
+        wcs_solution={
+            "width_px": 200,
+            "height_px": 120,
+            "wcs_header": dict(wcs.to_header()),
+        },
+        site_latitude_deg=50.0,
+        site_longitude_deg=15.0,
+        captured_at_utc="2026-09-15 20:35:36 UTC",
+        msa=np.zeros((60, 100)),
+        show_horizon_circle=True,
+        show_altitude_circles=True,
+    )
+    base = (120, 40, 20)
+    image = Image.new("RGB", (200, 120), base)
+    rendering._draw_wcs_altaz_grid(
+        ImageDraw.Draw(image), result, 0, 0, 200, 120, 1
+    )
+    assert any(pixel != base for pixel in image.getdata())

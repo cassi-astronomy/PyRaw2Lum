@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .core import process_file
@@ -45,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Volitelny JSON profil hvezdne absolutni fotometricke kalibrace",
     )
     parser.add_argument(
+        "--geometry",
+        choices=("auto", "fisheye", "rectilinear"),
+        default="auto",
+        help="Geometrie mapy: automaticky, rybi oko, nebo obdelnik",
+    )
+    parser.add_argument("--wcs", type=Path, help="JSON reseni vytvorene pres ASTAP")
+    parser.add_argument("--latitude", type=float, help="Zemepisna sirka pro Alt/Az sit")
+    parser.add_argument("--longitude", type=float, help="Zemepisna delka pro Alt/Az sit")
+    parser.add_argument(
         "--language",
         choices=("cs", "en"),
         default="cs",
@@ -67,6 +77,14 @@ def main() -> None:
     args = build_parser().parse_args()
     set_language(args.language)
     failures = 0
+    wcs_solution = None
+    if args.wcs:
+        wcs_solution = json.loads(args.wcs.read_text(encoding="utf-8"))
+    site_coordinates = (
+        (args.latitude, args.longitude)
+        if args.latitude is not None and args.longitude is not None
+        else None
+    )
     for light in args.lights:
         try:
             process_file(
@@ -83,6 +101,9 @@ def main() -> None:
                 language=args.language,
                 show_horizon_circle=not args.no_horizon_circle,
                 show_altitude_circles=args.altitude_circles,
+                projection_mode=args.geometry,
+                wcs_solution=wcs_solution,
+                site_coordinates=site_coordinates,
             )
         except Exception as exc:  # CLI musi pokracovat dalsim snimkem
             failures += 1

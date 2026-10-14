@@ -102,6 +102,7 @@ def _raw_to_tiff(source: Path, target: Path) -> tuple[int, int]:
             use_camera_wb=True,
             no_auto_bright=False,
             gamma=(2.222, 4.5),
+            user_flip=0,
         )
     image = Image.fromarray(np.asarray(rgb, dtype=np.uint8), mode="RGB")
     image.save(target, format="TIFF", compression="tiff_lzw")
@@ -208,3 +209,8 @@ def save_astap_solution(solution: AstapSolution, path: str | Path) -> Path:
         encoding="utf-8",
     )
     return target
+
+
+def load_astap_solution(path: str | Path) -> AstapSolution:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return AstapSolution(**data)

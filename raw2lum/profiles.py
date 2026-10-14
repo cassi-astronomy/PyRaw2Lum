@@ -24,10 +24,29 @@ class InstrumentProfile:
     vignetting_coefficients: tuple[float, ...]
     max_calibrated_radius: float
     notes: str = ""
+    projection: str = "fisheye_equisolid"
+    crop_width: int | None = None
+    crop_height: int | None = None
 
     @property
     def output_size(self) -> int:
         return self.crop_size // 2
+
+    @property
+    def input_width(self) -> int:
+        return self.crop_width or self.crop_size
+
+    @property
+    def input_height(self) -> int:
+        return self.crop_height or self.crop_size
+
+    @property
+    def output_width(self) -> int:
+        return self.input_width // 2
+
+    @property
+    def output_height(self) -> int:
+        return self.input_height // 2
 
     def vignetting(self, shape: tuple[int, int]) -> np.ndarray:
         """Relativni propustnost objektivu podle puvodniho Pascalu."""
@@ -126,4 +145,55 @@ def profile_for_camera(camera_model: str) -> InstrumentProfile:
         )
     raise ValueError(
         f"Pro fotoaparat {camera_model!r} existuje vice profilu; vyberte objektiv rucne."
+    )
+
+
+def rectilinear_profile(
+    camera_model: str,
+    lens_name: str | None,
+    focal_length_mm: float,
+    aperture: float,
+    raw_width: int,
+    raw_height: int,
+) -> InstrumentProfile:
+    """Create a full-sensor profile for an ordinary rectilinear lens.
+
+    The body response is inherited from an existing calibrated body when
+    possible.  A star calibration and a measured flat are still required for
+    traceable absolute photometry of the new camera/lens combination.
+    """
+
+    base = next((p for p in PROFILES.values() if p.camera_model == camera_model), None)
+    if base is None:
+        raise ValueError(
+            f"Pro fotoaparat {camera_model!r} zatim neni znam ani zakladni profil snimace."
+        )
+    width = int(raw_width) - int(raw_width) % 2
+    height = int(raw_height) - int(raw_height) % 2
+    if width < 2 or height < 2 or focal_length_mm <= 0:
+        raise ValueError("Neplatne rozmery RAWu nebo ohniskova vzdalenost.")
+    sensor_width = 22.3 if "600D" in camera_model else 36.0
+    safe_lens = "_".join((lens_name or f"{focal_length_mm:g}mm").casefold().split())
+    return InstrumentProfile(
+        key=f"rectilinear_{base.key}_{safe_lens}",
+        camera_model=camera_model,
+        lens_name=lens_name or f"Rectilinear {focal_length_mm:g} mm",
+        focal_length_mm=float(focal_length_mm),
+        reference_aperture=float(aperture),
+        crop_x=0,
+        crop_y=0,
+        crop_size=min(width, height),
+        crop_width=width,
+        crop_height=height,
+        sensor_width_mm=sensor_width,
+        calibration_divisor=base.calibration_divisor,
+        rgb_radiance=base.rgb_radiance,
+        photopic_weights=base.photopic_weights,
+        vignetting_coefficients=(1.0,),
+        max_calibrated_radius=float(np.hypot(width / 2.0, height / 2.0) / 2.0),
+        projection="rectilinear",
+        notes=(
+            "Obdelnikovy profil celeho snimace. Absolutni fotometrie vyzaduje "
+            "hvezdnou kalibraci teto sestavy a zmereny flat/vinetacni profil."
+        ),
     )

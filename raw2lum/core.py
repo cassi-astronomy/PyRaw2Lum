@@ -20,7 +20,7 @@ from .color_analysis import SkyColorSummary, compute_color_indices, summarize_co
 from .i18n import get_language, tr
 from .palette import colorize
 from .photometric_calibration import load_star_calibration
-from .profiles import InstrumentProfile, profile_for_camera
+from .profiles import InstrumentProfile, profile_for_camera, rectilinear_profile
 from .vignetting import VignettingCalibration, load_vignetting_calibration
 
 ARCSEC_RAD = math.pi / 180.0 / 3600.0
@@ -39,6 +39,24 @@ def _vignetting_transmissions(
         return tuple(custom.transmission(channel, shape) for channel in ("R", "G", "B"))
     built_in = profile.vignetting(shape)
     return built_in, built_in, built_in
+
+
+def _rectilinear_solid_angle_correction(
+    profile: InstrumentProfile, shape: tuple[int, int]
+) -> np.ndarray:
+    """Normalize the changing sky solid angle of a rectilinear sensor cell.
+
+    A point-source vignetting calibration measures optical throughput, while
+    extended-sky radiance also needs the gnomonic pixel solid-angle Jacobian.
+    The correction is one on the optical axis and rises towards the corners.
+    """
+
+    height, width = shape
+    yy, xx = np.indices(shape, dtype=np.float64)
+    sensor_height_mm = profile.sensor_width_mm * profile.input_height / profile.input_width
+    x_over_f = ((xx + 0.5) / width - 0.5) * profile.sensor_width_mm / profile.focal_length_mm
+    y_over_f = ((yy + 0.5) / height - 0.5) * sensor_height_mm / profile.focal_length_mm
+    return np.power(1.0 + x_over_f * x_over_f + y_over_f * y_over_f, 1.5)
 
 
 @dataclass(frozen=True)
@@ -83,6 +101,12 @@ class AnalysisResult:
     photometric_calibration: str | None = None
     show_horizon_circle: bool = True
     show_altitude_circles: bool = False
+    projection_mode: str = "fisheye_equisolid"
+    wcs_solution: dict[str, object] | None = None
+    site_latitude_deg: float | None = None
+    site_longitude_deg: float | None = None
+    reference_label: str = "Zenit"
+    absolute_calibrated: bool = True
 
     def report(self) -> dict[str, object]:
         valid = np.isfinite(self.luminance_cd_m2) & (self.luminance_cd_m2 > 0)
@@ -104,8 +128,11 @@ class AnalysisResult:
                 else None
             ),
             "orientation": self.orientation_info,
+            "projection_mode": self.projection_mode,
+            "wcs_solution": self.wcs_solution,
             "vignetting_calibration": self.vignetting_calibration,
             "photometric_calibration": self.photometric_calibration,
+            "absolute_calibrated": self.absolute_calibrated,
             "map_overlays": {
                 "horizon_circle": self.show_horizon_circle,
                 "altitude_circles_10_deg": self.show_altitude_circles,
@@ -219,6 +246,35 @@ def read_exif(path: str | Path) -> ExifData:
             )
 
 
+def profile_for_image(
+    path: str | Path,
+    projection_mode: str = "auto",
+) -> InstrumentProfile:
+    """Select the calibrated fisheye profile or construct a full RAW rectangle."""
+
+    source = Path(path)
+    exif = read_exif(source)
+    mode = projection_mode
+    if mode == "auto":
+        mode = "rectilinear" if (exif.focal_length_mm or 0.0) > 10.0 else "fisheye"
+    if mode == "fisheye":
+        return profile_for_camera(exif.camera_model)
+    if mode != "rectilinear":
+        raise ValueError(f"Neznamy rezim geometrie {projection_mode!r}.")
+    with rawpy.imread(str(source)) as raw:
+        raw_height, raw_width = raw.raw_image_visible.shape
+    if exif.focal_length_mm is None:
+        raise ValueError("Obdelnikovy rezim vyzaduje ohniskovou vzdalenost v EXIFu.")
+    return rectilinear_profile(
+        exif.camera_model,
+        exif.lens_model,
+        exif.focal_length_mm,
+        exif.aperture,
+        raw_width,
+        raw_height,
+    )
+
+
 def exif_time_to_utc(captured_at: str | None, source_timezone: str) -> str | None:
     """Prevede EXIF cas bez zony na jednoznacny text v UTC."""
 
@@ -273,10 +329,11 @@ def _load_visible_crop(
 ) -> tuple[np.ndarray, int, tuple[str, str, str, str]]:
     with rawpy.imread(str(path)) as raw:
         visible = raw.raw_image_visible
-        x0, y0, size = profile.crop_x, profile.crop_y, profile.crop_size
-        if y0 + size > visible.shape[0] or x0 + size > visible.shape[1]:
+        x0, y0 = profile.crop_x, profile.crop_y
+        width, height = profile.input_width, profile.input_height
+        if y0 + height > visible.shape[0] or x0 + width > visible.shape[1]:
             raise ValueError(f"Kalibracni vyrez se nevejde do RAW obrazu {path.name}.")
-        crop = visible[y0 : y0 + size, x0 : x0 + size].astype(np.float32).copy()
+        crop = visible[y0 : y0 + height, x0 : x0 + width].astype(np.float32).copy()
         color_desc = raw.color_desc.decode("ascii")
         color_ids = raw.raw_colors_visible[y0 : y0 + 2, x0 : x0 + 2]
         labels = tuple(color_desc[int(value)] for value in color_ids.ravel())
@@ -343,6 +400,9 @@ def analyze_raw(
     language: str | None = None,
     show_horizon_circle: bool = True,
     show_altitude_circles: bool = False,
+    projection_mode: str = "fisheye",
+    wcs_solution: dict[str, object] | None = None,
+    site_coordinates: tuple[float, float] | None = None,
 ) -> AnalysisResult:
     """Analyzuje jeden light RAW s automaticky vybranymi odpovidajicimi darky."""
 
@@ -359,7 +419,7 @@ def analyze_raw(
             f"Pro {light_path.name} nebyl nalezen dark se stejnym fotoaparatem a ISO "
             f"v toleranci expozice ±1,0 s (light {light_exif.exposure_s:g} s)."
         )
-    profile = profile or profile_for_camera(light_exif.camera_model)
+    profile = profile or profile_for_image(light_path, projection_mode)
 
     if light_exif.camera_model != profile.camera_model:
         raise ValueError(
@@ -414,6 +474,13 @@ def analyze_raw(
         relative_red = rr * red[0] / transmission_r
         relative_green = gg * (green[0] + green[1]) / 2.0 / transmission_g
         relative_blue = bb * blue[0] / transmission_b
+    if profile.projection == "rectilinear":
+        solid_angle_correction = _rectilinear_solid_angle_correction(
+            profile, relative_green.shape
+        )
+        relative_red *= solid_angle_correction
+        relative_green *= solid_angle_correction
+        relative_blue *= solid_angle_correction
     calibration_divisor = profile.calibration_divisor
     if photometric_calibration_path:
         star_calibration = load_star_calibration(photometric_calibration_path)
@@ -461,9 +528,23 @@ def analyze_raw(
         camera_z = np.cos(camera_distance)
         world_up = matrix[2, 0] * camera_x + matrix[2, 1] * camera_y + matrix[2, 2] * camera_z
         angles = np.degrees(np.arccos(np.clip(world_up, -1.0, 1.0)))
-    else:
+    elif profile.projection == "fisheye_equisolid":
         angles = profile.zenith_angle_deg(luminance.shape)
-    zenith_mask = (angles <= 5.0) & np.isfinite(luminance) & (luminance > 0)
+    else:
+        angles = np.full(luminance.shape, np.nan, dtype=np.float64)
+    if profile.projection == "rectilinear":
+        height, width = luminance.shape
+        yy, xx = np.indices(luminance.shape)
+        center_radius = max(2.0, min(width, height) * 0.05)
+        zenith_mask = (
+            (np.hypot(xx - width / 2.0, yy - height / 2.0) <= center_radius)
+            & np.isfinite(luminance)
+            & (luminance > 0)
+        )
+        reference_label = "Field center"
+    else:
+        zenith_mask = (angles <= 5.0) & np.isfinite(luminance) & (luminance > 0)
+        reference_label = "Zenit"
     zenith_cd = float(np.nanmedian(luminance[zenith_mask]))
     zenith_msa = float(luminance_to_msa(zenith_cd))
     saturated = np.logical_or.reduce(
@@ -526,6 +607,15 @@ def analyze_raw(
         ),
         show_horizon_circle=show_horizon_circle,
         show_altitude_circles=show_altitude_circles,
+        projection_mode=profile.projection,
+        wcs_solution=wcs_solution,
+        site_latitude_deg=site_coordinates[0] if site_coordinates else None,
+        site_longitude_deg=site_coordinates[1] if site_coordinates else None,
+        reference_label=reference_label,
+        absolute_calibrated=(
+            profile.projection == "fisheye_equisolid"
+            or photometric_calibration_path is not None
+        ),
     )
 
 
@@ -545,6 +635,9 @@ def process_file(
     language: str | None = None,
     show_horizon_circle: bool = True,
     show_altitude_circles: bool = False,
+    projection_mode: str = "fisheye",
+    wcs_solution: dict[str, object] | None = None,
+    site_coordinates: tuple[float, float] | None = None,
 ) -> AnalysisResult:
     """Analyzuje RAW a ulozi PNG, numericka pole a JSON report."""
 
@@ -575,6 +668,9 @@ def process_file(
         language=language,
         show_horizon_circle=show_horizon_circle,
         show_altitude_circles=show_altitude_circles,
+        projection_mode=projection_mode,
+        wcs_solution=wcs_solution,
+        site_coordinates=site_coordinates,
     )
     notify(
         tr(
@@ -583,6 +679,12 @@ def process_file(
             language,
         )
     )
+    if not result.absolute_calibrated:
+        notify(tr(
+            "VAROVÁNÍ: obdélníková mapa nemá hvězdnou kalibraci této sestavy; "
+            "absolutní nulový bod MSA a cd/m² je pouze experimentální.",
+            language,
+        ))
     stem = light_path.stem
 
     msa_png_path = output_dir / f"{stem}_jas_oblohy_MSA.png"
@@ -594,7 +696,9 @@ def process_file(
     color_png_path = output_dir / f"{stem}_barva_oblohy_B_podil.png"
     render_blue_fraction_map(result, color_png_path, display_scale=display_scale)
     notify(tr(f"Ulozeno {color_png_path.name} (experimentalni RGB index)", language))
-    if result.north_angle_deg is not None or result.orientation_matrix is not None:
+    if result.projection_mode == "fisheye_equisolid" and (
+        result.north_angle_deg is not None or result.orientation_matrix is not None
+    ):
         msa_pano_path = output_dir / f"{stem}_panorama_MSA.png"
         cd_pano_path = output_dir / f"{stem}_panorama_cd_m2.png"
         render_msa_panorama(result, msa_pano_path, display_scale=display_scale)

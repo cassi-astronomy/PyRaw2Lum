@@ -53,7 +53,7 @@ class StarPhotometricCalibration:
 def derive_star_calibration(extinction_result, profile, exif) -> StarPhotometricCalibration:
     """Derive the radiance divisor from the above-atmosphere Bouguer intercept."""
 
-    pixel_pitch_mm = profile.sensor_width_mm * 2.0 / profile.crop_size
+    pixel_pitch_mm = profile.sensor_width_mm * 2.0 / profile.input_width
     solid_angle = (pixel_pitch_mm / profile.focal_length_mm) ** 2
     measured_zero_star_sum = 10.0 ** (-0.4 * extinction_result.zero_point)
     divisor_used = float(extinction_result.calibration_divisor_used)

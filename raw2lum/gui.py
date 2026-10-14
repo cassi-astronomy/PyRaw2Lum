@@ -27,6 +27,7 @@ from .astap_solver import (
 from .core import (
     exif_time_to_utc,
     make_orientation_preview,
+    profile_for_image,
     process_file,
     read_exif,
 )
@@ -110,6 +111,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.north_angles: dict[Path, float] = {}
         self.orientation_matrices: dict[Path, np.ndarray] = {}
         self.orientation_info: dict[Path, dict[str, object]] = {}
+        self.wcs_solutions: dict[Path, dict[str, object]] = {}
         self.site_coordinates: dict[Path, tuple[float, float]] = {}
         self.last_site_coordinates: tuple[float, float] | None = None
         self.darks: list[Path] = []
@@ -118,6 +120,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.scale = tk.IntVar(value=2)
         self.show_horizon_circle = tk.BooleanVar(value=True)
         self.show_altitude_circles = tk.BooleanVar(value=False)
+        self.map_mode = tk.StringVar(value="auto")
         self.extinction_light = tk.StringVar()
         self.extinction_catalog = tk.StringVar(value=str(bundled_gaia_catalog_path()))
         self.extinction_mode = tk.StringVar(value="tracker")
@@ -160,7 +163,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ttk.Label(root, text="PyRaw2Lum", font=("Segoe UI", 22, "bold")).pack(anchor="w")
         ttk.Label(
             root,
-            text="Kalibrovaná celooblohová fotometrie · Canon 600D / R6m2 + Sigma 4,5 mm",
+            text="Fotometrie oblohy · rybí oko i běžné objektivy · MSA a cd/m²",
         ).pack(anchor="w", pady=(0, 15))
 
         light_box = ttk.LabelFrame(root, text="Light RAW snímky", padding=10)
@@ -196,6 +199,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ttk.Button(buttons, text="Přidat…", command=self._add_lights).pack(fill="x")
         ttk.Button(buttons, text="Lokalita…", command=self._edit_locations).pack(fill="x", pady=(6, 0))
         ttk.Button(buttons, text="Orientace…", command=self._set_orientation).pack(fill="x", pady=(6, 0))
+        ttk.Button(buttons, text="ASTAP WCS…", command=self._solve_selected_astap).pack(fill="x", pady=(6, 0))
         ttk.Button(buttons, text="Odebrat", command=self._remove_lights).pack(fill="x", pady=6)
         ttk.Button(buttons, text="Vymazat", command=self._clear_lights).pack(fill="x")
 
@@ -287,22 +291,29 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ttk.Radiobutton(options, text="2×", variable=self.scale, value=2).pack(side="left", padx=8)
         ttk.Radiobutton(options, text="3×", variable=self.scale, value=3).pack(side="left", padx=8)
 
+        map_modes = ttk.Frame(root)
+        map_modes.pack(fill="x", pady=(0, 6))
+        ttk.Label(map_modes, text="Geometrie výstupu:").pack(side="left")
+        ttk.Radiobutton(map_modes, text="automaticky", variable=self.map_mode, value="auto").pack(side="left", padx=8)
+        ttk.Radiobutton(map_modes, text="rybí oko", variable=self.map_mode, value="fisheye").pack(side="left", padx=8)
+        ttk.Radiobutton(map_modes, text="obdélníková mapa", variable=self.map_mode, value="rectilinear").pack(side="left", padx=8)
+
         overlays = ttk.Frame(root)
         overlays.pack(fill="x", pady=(0, 6))
-        ttk.Label(overlays, text="Kružnice v kruhových mapách:").pack(side="left")
+        ttk.Label(overlays, text="Souřadnicová síť:").pack(side="left")
         ttk.Checkbutton(
             overlays,
-            text="matematický horizont",
+            text="horizont",
             variable=self.show_horizon_circle,
         ).pack(side="left", padx=(8, 4))
         ttk.Checkbutton(
             overlays,
-            text="výšky po 10°",
+            text="výška/azimut po 10°",
             variable=self.show_altitude_circles,
         ).pack(side="left", padx=4)
         ttk.Label(
             overlays,
-            text="(jen po hvězdné astrometrii)",
+            text="(jen po astrometrii)",
             foreground="#666666",
         ).pack(side="left", padx=(6, 0))
 
@@ -862,6 +873,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     tr(
                         "astrometrie"
                         if path in self.orientation_matrices
+                        else "ASTAP WCS"
+                        if path in self.wcs_solutions
                         else "směr určen"
                         if path in self.north_angles
                         else "jen kruhová mapa"
@@ -1396,6 +1409,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.north_angles.pop(path, None)
             self.orientation_matrices.pop(path, None)
             self.orientation_info.pop(path, None)
+            self.wcs_solutions.pop(path, None)
             self.site_coordinates.pop(path, None)
         self._refresh_lights()
 
@@ -1405,6 +1419,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.north_angles.clear()
         self.orientation_matrices.clear()
         self.orientation_info.clear()
+        self.wcs_solutions.clear()
         self.site_coordinates.clear()
         self._refresh_lights()
 
@@ -1569,9 +1584,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.vignetting_registry.remove(path)
         self._refresh_vignetting_profiles()
 
-    def _automatic_vignetting_path(self, light: Path) -> str | None:
+    def _automatic_vignetting_path(self, light: Path, mode: str = "fisheye") -> str | None:
         exif = read_exif(light)
-        profile = profile_for_camera(exif.camera_model)
+        profile = profile_for_image(light, mode)
         match = self.vignetting_registry.match(exif, profile)
         return str(match) if match is not None else None
 
@@ -1608,9 +1623,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.photometric_registry.remove(path)
         self._refresh_photometric_profiles()
 
-    def _automatic_photometric_path(self, light: Path) -> str | None:
+    def _automatic_photometric_path(self, light: Path, mode: str = "fisheye") -> str | None:
         exif = read_exif(light)
-        profile = profile_for_camera(exif.camera_model)
+        profile = profile_for_image(light, mode)
         match = self.photometric_registry.match(exif, profile)
         return str(match) if match is not None else None
 
@@ -1688,6 +1703,54 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             args=(source, executable, field_height),
             daemon=True,
         ).start()
+
+    def _solve_selected_astap(self) -> None:
+        """Solve the selected main light and keep its WCS for map rendering."""
+
+        selected = self.light_table.selection()
+        if len(selected) != 1:
+            messagebox.showinfo("Vyberte snímek", "Vyberte právě jeden light snímek.")
+            return
+        source = self.lights[int(selected[0])]
+        previous = self.site_coordinates.get(source) or self.last_site_coordinates
+        latitude = simpledialog.askfloat(
+            "Poloha snímku",
+            "Zeměpisná šířka [°]:",
+            initialvalue=previous[0] if previous else 50.0,
+            minvalue=-90.0,
+            maxvalue=90.0,
+            parent=self,
+        )
+        if latitude is None:
+            return
+        longitude = simpledialog.askfloat(
+            "Poloha snímku",
+            "Zeměpisná délka [°; východ kladný]:",
+            initialvalue=previous[1] if previous else 15.0,
+            minvalue=-180.0,
+            maxvalue=180.0,
+            parent=self,
+        )
+        if longitude is None:
+            return
+        self.site_coordinates[source] = (float(latitude), float(longitude))
+        self.last_site_coordinates = self.site_coordinates[source]
+        self.astap_image.set(str(source))
+        try:
+            exif = read_exif(source)
+            model = exif.camera_model.casefold()
+            sensor_height = 14.9 if "600d" in model else 24.0 if any(
+                value in model for value in ("r6", "6d")
+            ) else None
+            if sensor_height and exif.focal_length_mm:
+                self.astap_fov_height.set(round(math.degrees(
+                    2.0 * math.atan(sensor_height / (2.0 * exif.focal_length_mm))
+                ), 2))
+        except (OSError, ValueError, TypeError):
+            pass
+        self._refresh_astap_database_status()
+        self.notebook.select(self.photometric_tab)
+        self._start_astap_solve()
 
     def _astap_worker(self, source: Path, executable: Path, field_height: float) -> None:
         try:
@@ -2052,6 +2115,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             dict(self.north_angles),
             dict(self.orientation_matrices),
             dict(self.orientation_info),
+            dict(self.wcs_solutions),
+            dict(self.site_coordinates),
             list(self.darks),
             self.output_path.get(),
             int(self.scale.get()),
@@ -2059,6 +2124,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self.language_code,
             bool(self.show_horizon_circle.get()),
             bool(self.show_altitude_circles.get()),
+            self.map_mode.get(),
         )
         threading.Thread(target=self._worker, args=job, daemon=True).start()
 
@@ -2069,6 +2135,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         north_angles: dict[Path, float],
         orientation_matrices: dict[Path, np.ndarray],
         orientation_info: dict[Path, dict[str, object]],
+        wcs_solutions: dict[Path, dict[str, object]],
+        site_coordinates: dict[Path, tuple[float, float]],
         dark_paths: list[Path],
         output_path: str,
         display_scale: int,
@@ -2076,12 +2144,21 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         language: str,
         show_horizon_circle: bool,
         show_altitude_circles: bool,
+        map_mode: str,
     ) -> None:
         errors: list[str] = []
         for index, light in enumerate(lights, start=1):
             try:
-                vignetting_calibration_path = self._automatic_vignetting_path(light)
-                photometric_calibration_path = self._automatic_photometric_path(light)
+                exif = read_exif(light)
+                selected_mode = map_mode
+                if selected_mode == "auto":
+                    selected_mode = (
+                        "rectilinear"
+                        if light in wcs_solutions or (exif.focal_length_mm or 0.0) > 10.0
+                        else "fisheye"
+                    )
+                vignetting_calibration_path = self._automatic_vignetting_path(light, selected_mode)
+                photometric_calibration_path = self._automatic_photometric_path(light, selected_mode)
                 if vignetting_calibration_path:
                     self.messages.put(
                         ("log", f"Automaticky vybrán profil vinětace: {vignetting_calibration_path}")
@@ -2106,6 +2183,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     language=language,
                     show_horizon_circle=show_horizon_circle,
                     show_altitude_circles=show_altitude_circles,
+                    projection_mode=selected_mode,
+                    wcs_solution=wcs_solutions.get(light),
+                    site_coordinates=site_coordinates.get(light),
                 )
             except Exception as exc:
                 errors.append(f"{light.name}: {exc}")
@@ -2242,6 +2322,10 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     self.astap_progress.stop()
                     self.astap_button.configure(state="normal")
                     solution, output = payload
+                    source = Path(solution.source)
+                    if source in self.lights:
+                        self.wcs_solutions[source] = solution.report()
+                        self._refresh_lights()
                     self._write_photometric(
                         "ASTAP WCS VYŘEŠENO\n"
                         f"Střed: RA {solution.center_ra_deg:.5f}°, "
