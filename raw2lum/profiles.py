@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 import numpy as np
 
@@ -173,9 +174,14 @@ def rectilinear_profile(
     if width < 2 or height < 2 or focal_length_mm <= 0:
         raise ValueError("Neplatne rozmery RAWu nebo ohniskova vzdalenost.")
     sensor_width = 22.3 if "600D" in camera_model else 36.0
-    safe_lens = "_".join((lens_name or f"{focal_length_mm:g}mm").casefold().split())
+    safe_lens = re.sub(
+        r"[^a-z0-9_.-]+",
+        "_",
+        (lens_name or "lens").casefold(),
+    ).strip("_.") or "lens"
+    focal_key = f"{focal_length_mm:g}".replace(".", "p")
     return InstrumentProfile(
-        key=f"rectilinear_{base.key}_{safe_lens}",
+        key=f"rectilinear_{base.key}_{safe_lens}_{focal_key}mm",
         camera_model=camera_model,
         lens_name=lens_name or f"Rectilinear {focal_length_mm:g} mm",
         focal_length_mm=float(focal_length_mm),

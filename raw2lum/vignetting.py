@@ -25,6 +25,7 @@ class VignettingCalibration:
     measurements: tuple[dict[str, object], ...] = ()
     schema_version: int = 1
     model: str = "radial_log_even"
+    projection: str = "fisheye_equisolid"
 
     def validate_for(self, profile, aperture: float) -> None:
         if self.profile_key != profile.key or self.camera_model != profile.camera_model:
@@ -38,6 +39,8 @@ class VignettingCalibration:
             )
         if self.model != "radial_log_even":
             raise ValueError(f"Nepodporovany model vinetace {self.model!r}.")
+        if self.projection not in ("fisheye_equisolid", "rectilinear"):
+            raise ValueError(f"Nepodporovana geometrie profilu {self.projection!r}.")
         if self.max_radius_px <= 0:
             raise ValueError("Profil vinetace ma neplatny polomer.")
         for channel in ("R", "G", "B"):
@@ -66,6 +69,7 @@ class VignettingCalibration:
         return {
             "schema_version": self.schema_version,
             "model": self.model,
+            "projection": self.projection,
             "profile_key": self.profile_key,
             "camera_model": self.camera_model,
             "description": self.description,
@@ -99,6 +103,7 @@ def load_vignetting_calibration(path: str | Path) -> VignettingCalibration:
         calibration = VignettingCalibration(
             schema_version=int(data.get("schema_version", 1)),
             model=str(data["model"]),
+            projection=str(data.get("projection", "fisheye_equisolid")),
             profile_key=str(data["profile_key"]),
             camera_model=str(data["camera_model"]),
             description=(

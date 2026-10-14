@@ -79,6 +79,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(profile.projection, "rectilinear")
         self.assertEqual((profile.input_width, profile.input_height), (5184, 3456))
         self.assertEqual((profile.output_width, profile.output_height), (2592, 1728))
+        self.assertNotIn("/", profile.key)
 
     def test_rectilinear_pixel_solid_angle_is_corrected_towards_corners(self) -> None:
         profile = rectilinear_profile(

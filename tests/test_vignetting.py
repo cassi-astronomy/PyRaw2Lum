@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from raw2lum.profiles import CANON_600D_SIGMA_45
+from raw2lum.profiles import CANON_600D_SIGMA_45, rectilinear_profile
 from raw2lum.core import _vignetting_transmissions
 from raw2lum.vignetting import (
     VignettingCalibration,
@@ -137,6 +137,36 @@ class VignettingTests(unittest.TestCase):
         np.testing.assert_allclose(blue, calibration.transmission("B", shape))
         built_in = CANON_600D_SIGMA_45.vignetting(shape)
         self.assertNotAlmostEqual(green[0, 0], green[0, 0] * built_in[0, 0], places=6)
+
+    def test_rectilinear_profile_round_trip_and_automatic_match(self) -> None:
+        profile = rectilinear_profile(
+            "Canon EOS 600D", "EF 50mm f/1.8 STM", 50.0, 2.8, 5202, 3464
+        )
+        calibration = VignettingCalibration(
+            profile_key=profile.key,
+            camera_model=profile.camera_model,
+            lens_name=profile.lens_name,
+            lens_model_exif="EF 50mm f/1.8 STM",
+            aperture=2.8,
+            max_radius_px=profile.max_calibrated_radius,
+            coefficients={"R": (-0.2,), "G": (-0.25,), "B": (-0.3,)},
+            fit_rms_percent={"R": 1.0, "G": 1.0, "B": 1.0},
+            projection="rectilinear",
+        )
+        exif = SimpleNamespace(
+            camera_model="Canon EOS 600D",
+            lens_model="EF 50mm f/1.8 STM",
+            aperture=2.8,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            registry = VignettingProfileRegistry(directory)
+            path = registry.store(calibration)
+            loaded = load_vignetting_calibration(path)
+            self.assertEqual(loaded.projection, "rectilinear")
+            self.assertEqual(registry.match(exif, profile), path)
+            transmission = loaded.transmission("G", (1732, 2601))
+            self.assertAlmostEqual(transmission[866, 1300], 1.0, places=6)
+            self.assertLess(transmission[0, 0], 1.0)
 
 
 if __name__ == "__main__":

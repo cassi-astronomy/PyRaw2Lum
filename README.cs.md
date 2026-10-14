@@ -399,6 +399,8 @@ zavře se libovolnou klávesou, takže jej lze přímo fotografovat.
 - použijte nejméně 10, lépe 15–30 RAW snímků,
 - zachovejte stejný fotoaparát, objektiv, clonu a ISO,
 - zahrňte polohu blízko středu (`r < 0,18`) i blízko okraje (`r > 0,72`),
+- u běžného 20/50/100mm objektivu zvolte **běžný objektiv** (nebo automatiku)
+  a proměřte také strany a rohy obdélníkového snímku,
 - na několika poloměrech použijte více azimutů,
 - zdroj nesmí být saturovaný ani v nejjasnější středové poloze,
 - průběžně opakujte středovou polohu pro kontrolu stability zdroje,
@@ -413,8 +415,9 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 ```
 
 Propustnost je normalizována na `T(0) = 1`. Výsledkem je JSON profil a kontrolní
-PNG graf naměřených bodů a křivek R/G/B společně s původní vestavěnou
-Hollanovou křivkou pro přímé porovnání. Protokol navíc porovná propustnost v
+PNG graf naměřených bodů a křivek R/G/B. U kalibrovaného rybího oka se pro
+přímé porovnání přidá původní Hollanova křivka; u běžného objektivu se zobrazí
+jen jeho skutečně naměřený profil. Protokol navíc porovná propustnost v
 normalizovaných poloměrech 0,5, 0,8 a 1,0. Po úspěšné kalibraci GUI nový JSON
 automaticky přidá také do trvalého správce. Na kartě **Jas oblohy** lze profily
 přidávat, odebírat a pojmenovat například `Canon 600D + Sigma 4,5 mm`; pro
@@ -426,10 +429,11 @@ Vlastní profil **nahrazuje** vestavěnou Hollanovu korekci vinětace; obě kore
 se nikdy nenásobí. Samotná kalibrační série se pouze opraví darkem a vestavěná
 křivka se na ni před měřením neaplikuje.
 
-Kalibrátor nyní vyžaduje, aby pro daný fotoaparát už existoval základní profil
-PyRaw2Lum s výřezem, středem a poloměrem obrazového kruhu. Pro budoucí Canon 6D
-Mark I + 8mm rybí oko bude proto nejprve potřeba z ukázkového RAWu doplnit
-základní geometrii sestavy; vlastní vinětaci potom změří tato karta.
+Pro rektilineární 20/50/100mm objektivy na podporovaném těle vytvoří PyRaw2Lum
+geometrii celého snímače přímo z RAWu a EXIFu. Uložený profil rozlišuje model
+fotoaparátu, EXIF název objektivu, ohnisko a clonu a při dalších mapách se volí
+automaticky. Nová sestava s rybím okem nadále potřebuje nejprve doplnit
+geometrii obrazového kruhu z ukázkového RAWu.
 
 ## Experimentální kalibrace sestavy na hvězdách
 

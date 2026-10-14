@@ -134,6 +134,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.vignetting_entries: list[tuple[Path, object]] = []
         self.calibration_images: list[Path] = []
         self.vignetting_description = tk.StringVar()
+        self.vignetting_geometry = tk.StringVar(value="auto")
         self.target_shape = tk.StringVar(value="square")
         self.target_size = tk.IntVar(value=40)
         self.photometric_registry = StarCalibrationRegistry()
@@ -567,7 +568,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             root,
             text=(
                 "Přidejte nejméně 10 RAWů stejného umělého zdroje v různých částech "
-                "obrazového kruhu. Doporučeno je 15–30 poloh, včetně středu a okraje. "
+                "obrazu. Doporučeno je 15–30 poloh, včetně středu, stran a rohů. "
                 "Použijí se odpovídající darky z karty Jas oblohy."
             ),
             wraplength=920,
@@ -608,6 +609,18 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             text="např. Canon 600D + Sigma 4,5 mm",
             foreground="#666666",
         ).pack(side="left", padx=(8, 0))
+        geometry_row = ttk.Frame(box)
+        geometry_row.pack(fill="x", pady=(0, 7))
+        ttk.Label(geometry_row, text="Geometrie objektivu", width=23).pack(side="left")
+        ttk.Radiobutton(
+            geometry_row, text="automaticky", variable=self.vignetting_geometry, value="auto"
+        ).pack(side="left")
+        ttk.Radiobutton(
+            geometry_row, text="rybí oko", variable=self.vignetting_geometry, value="fisheye"
+        ).pack(side="left", padx=(12, 0))
+        ttk.Radiobutton(
+            geometry_row, text="běžný objektiv", variable=self.vignetting_geometry, value="rectilinear"
+        ).pack(side="left", padx=(12, 0))
         list_frame = ttk.Frame(box)
         list_frame.pack(side="left", fill="both", expand=True)
         self.calibration_list = tk.Listbox(list_frame, height=9, selectmode="extended")
@@ -1936,6 +1949,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 list(self.darks),
                 output,
                 self.vignetting_description.get().strip(),
+                self.vignetting_geometry.get(),
             ),
             daemon=True,
         ).start()
@@ -1946,6 +1960,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         darks: list[Path],
         output: Path,
         description: str,
+        projection_mode: str,
     ) -> None:
         try:
             calibration, measurements = calibrate_vignetting(
@@ -1953,8 +1968,13 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                 darks,
                 description=description,
                 progress=lambda text: self.messages.put(("vign_log", text)),
+                projection_mode=projection_mode,
             )
-            reference_profile = profile_for_camera(calibration.camera_model)
+            reference_profile = (
+                profile_for_camera(calibration.camera_model)
+                if calibration.projection == "fisheye_equisolid"
+                else None
+            )
             preview = make_vignetting_plot(
                 calibration, measurements, reference_profile=reference_profile
             )
@@ -2284,12 +2304,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                         f"{channel} {calibration.fit_rms_percent[channel]:.2f} %"
                         for channel in ("R", "G", "B")
                     )
-                    reference_profile = profile_for_camera(calibration.camera_model)
                     comparison = []
                     for radius in (0.5, 0.8, 1.0):
-                        original = float(
-                            np.polyval(reference_profile.vignetting_coefficients, radius)
-                        )
                         green = math.exp(
                             sum(
                                 coefficient * radius ** (2 * (index + 1))
@@ -2298,9 +2314,16 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                                 )
                             )
                         )
-                        comparison.append(
-                            f"r={radius:.1f}: nový G {green:.3f}, Hollan {original:.3f}"
-                        )
+                        if calibration.projection == "fisheye_equisolid":
+                            reference_profile = profile_for_camera(calibration.camera_model)
+                            original = float(np.polyval(
+                                reference_profile.vignetting_coefficients, radius
+                            ))
+                            comparison.append(
+                                f"r={radius:.1f}: nový G {green:.3f}, Hollan {original:.3f}"
+                            )
+                        else:
+                            comparison.append(f"r={radius:.1f}: propustnost G {green:.3f}")
                     self._write_vignetting(
                         f"\nPROFIL ULOŽEN\n{profile_path}\nGraf: {plot_path}\n"
                         f"RMS fitu: {rms}\n"

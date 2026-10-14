@@ -346,6 +346,8 @@ closes it, so it can be photographed directly.
 - use at least 10, preferably 15–30 RAW images,
 - keep camera, lens, aperture, and ISO unchanged,
 - include positions near the centre (`r < 0.18`) and edge (`r > 0.72`),
+- for an ordinary 20/50/100 mm lens, select **ordinary lens** (or automatic)
+  and include the image sides and corners,
 - sample several azimuths at some radii,
 - avoid saturation even at the brightest central position,
 - repeat the centre position to monitor source stability,
@@ -360,8 +362,9 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 ```
 
 Transmission is normalized to `T(0) = 1`. The resulting JSON profile and PNG
-control plot show the measured points and R/G/B curves together with the
-original built-in Hollan curve for direct comparison. The log also compares
+control plot show the measured points and R/G/B curves. For the calibrated
+fisheye setup the original Hollan curve is included for direct comparison;
+for an ordinary lens only its measured profile is shown. The log also compares
 transmission at normalized radii 0.5, 0.8, and 1.0. The GUI automatically
 adds a successful profile to its persistent manager. Profiles can be added and
 removed on the **Sky brightness** tab, given a human-readable instrument name
@@ -372,9 +375,11 @@ A custom profile **replaces** the built-in Hollan vignetting correction; the
 two corrections are never multiplied. The calibration series itself is only
 dark-subtracted and is not pre-corrected with the built-in curve.
 
-The calibrator still needs a basic PyRaw2Lum camera/lens profile containing the
-crop, centre, and image-circle radius. A future Canon 6D Mark I + 8 mm fisheye
-setup therefore first needs this geometry added from a sample RAW.
+For 20/50/100 mm rectilinear lenses on a supported camera body, PyRaw2Lum
+constructs the full-sensor geometry directly from the RAW and EXIF. The saved
+profile is distinguished by camera, EXIF lens, focal length, and aperture and
+is selected automatically for later sky maps. A new fisheye combination still
+needs its image-circle geometry added from a sample RAW.
 
 ## Experimental stellar instrument calibration
 

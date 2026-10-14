@@ -180,11 +180,11 @@ def calibrate_vignetting(
     dark_paths: Sequence[str | Path],
     description: str | None = None,
     progress: Callable[[str], None] | None = None,
+    projection_mode: str = "auto",
 ) -> tuple[VignettingCalibration, tuple[SourceMeasurement, ...]]:
     """Zmeri radialni RGB profil vinetace ze serie RAW snimku jednoho zdroje."""
 
-    from .core import _load_visible_crop, dark_matches_light, read_exif
-    from .profiles import profile_for_camera
+    from .core import _load_visible_crop, dark_matches_light, profile_for_image, read_exif
 
     notify = progress or (lambda _message: None)
     images = [Path(path) for path in image_paths]
@@ -194,8 +194,10 @@ def calibrate_vignetting(
     if not darks:
         raise ValueError("Pro kalibraci pridejte alespon jeden odpovidajici dark.")
     first_exif = read_exif(images[0])
-    profile = profile_for_camera(first_exif.camera_model)
-    if not math.isclose(first_exif.aperture, profile.reference_aperture, abs_tol=0.06):
+    profile = profile_for_image(images[0], projection_mode)
+    if profile.projection == "fisheye_equisolid" and not math.isclose(
+        first_exif.aperture, profile.reference_aperture, abs_tol=0.06
+    ):
         raise ValueError(
             f"Sestava PyRaw2Lum je kalibrovana pro f/{profile.reference_aperture:g}; "
             f"kalibracni snimky maji f/{first_exif.aperture:g}."
@@ -209,6 +211,15 @@ def calibrate_vignetting(
             raise ValueError("Kalibracni rada obsahuje vice clonovych cisel.")
         if not math.isclose(exif.iso, first_exif.iso, rel_tol=0.0, abs_tol=0.5):
             raise ValueError("Kalibracni rada obsahuje vice hodnot ISO.")
+        if (exif.lens_model or "").strip().casefold() != (
+            first_exif.lens_model or ""
+        ).strip().casefold():
+            raise ValueError("Kalibracni rada obsahuje vice objektivu.")
+        if exif.focal_length_mm is not None and first_exif.focal_length_mm is not None:
+            if not math.isclose(
+                exif.focal_length_mm, first_exif.focal_length_mm, abs_tol=0.15
+            ):
+                raise ValueError("Kalibracni rada obsahuje vice ohniskovych vzdalenosti.")
         matches = [path for path in darks if dark_matches_light(exif, read_exif(path))]
         if not matches:
             raise ValueError(f"Pro {image_path.name} nebyl nalezen odpovidajici dark.")
@@ -284,6 +295,7 @@ def calibrate_vignetting(
         lens_model_exif=first_exif.lens_model,
         source_files=tuple(str(path) for path in images),
         measurements=tuple(item.report() for item in measurements),
+        projection=profile.projection,
     )
     calibration.validate_for(profile, first_exif.aperture)
     return calibration, tuple(measurements)
@@ -345,8 +357,11 @@ def make_vignetting_plot(
     if reference_profile is not None:
         legend += " · " + tr("čárkovaně: původní Hollanův profil")
     draw.text((left + 365, 22), legend, fill="#111111")
-    draw.text(
-        (left + 380, 650), tr("Normalizovany polomer obrazoveho kruhu"), fill="#111111"
+    radius_label = (
+        "Normalizovaný poloměr od optické osy"
+        if calibration.projection == "rectilinear"
+        else "Normalizovany polomer obrazoveho kruhu"
     )
+    draw.text((left + 380, 650), tr(radius_label), fill="#111111")
     draw.text((15, 42), tr("Propustnost"), fill="#111111")
     return image
