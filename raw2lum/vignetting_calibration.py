@@ -178,6 +178,7 @@ def _robust_radial_fit(radius: np.ndarray, flux: np.ndarray) -> tuple[np.ndarray
 def calibrate_vignetting(
     image_paths: Sequence[str | Path],
     dark_paths: Sequence[str | Path],
+    description: str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[VignettingCalibration, tuple[SourceMeasurement, ...]]:
     """Zmeri radialni RGB profil vinetace ze serie RAW snimku jednoho zdroje."""
@@ -274,6 +275,7 @@ def calibrate_vignetting(
     calibration = VignettingCalibration(
         profile_key=profile.key,
         camera_model=profile.camera_model,
+        description=(description or "").strip() or None,
         lens_name=profile.lens_name,
         aperture=first_exif.aperture,
         max_radius_px=profile.max_calibrated_radius,
@@ -290,6 +292,7 @@ def calibrate_vignetting(
 def make_vignetting_plot(
     calibration: VignettingCalibration,
     measurements: Sequence[SourceMeasurement],
+    reference_profile=None,
 ) -> Image.Image:
     width, height = 1100, 700
     left, top, right, bottom = 95, 65, 1040, 610
@@ -310,6 +313,17 @@ def make_vignetting_plot(
         draw.text((40, py(tick) - 7), f"{tick:.1f}", fill="#222222")
     colors = {"R": "#d82d2d", "G": "#178a32", "B": "#245bd6"}
     samples = np.linspace(0.0, 1.0, 300)
+    if reference_profile is not None:
+        reference_curve = np.polyval(reference_profile.vignetting_coefficients, samples)
+        reference_points = [
+            (px(float(x)), py(float(y))) for x, y in zip(samples, reference_curve)
+        ]
+        draw.line(reference_points, fill="#222222", width=3)
+        # A second light segment gives the solid line a clearly distinguishable
+        # dashed appearance without depending on a particular Pillow version.
+        for start in range(0, len(reference_points) - 1, 14):
+            end = min(start + 7, len(reference_points) - 1)
+            draw.line(reference_points[start : end + 1], fill="#eeeeee", width=2)
     for channel, attribute in (("R", "flux_r"), ("G", "flux_g"), ("B", "flux_b")):
         coefficients = calibration.coefficients[channel]
         log_transmission = sum(
@@ -327,7 +341,10 @@ def make_vignetting_plot(
             x, y = px(item.normalized_radius), py(float(value))
             draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=colors[channel])
     draw.text((left, 22), tr("Kalibrace vinetace umele hvezdy"), fill="#111111")
-    draw.text((left + 420, 22), tr("R / G / B: relativni propustnost"), fill="#111111")
+    legend = tr("R / G / B: relativni propustnost")
+    if reference_profile is not None:
+        legend += " · " + tr("čárkovaně: původní Hollanův profil")
+    draw.text((left + 365, 22), legend, fill="#111111")
     draw.text(
         (left + 380, 650), tr("Normalizovany polomer obrazoveho kruhu"), fill="#111111"
     )

@@ -316,6 +316,9 @@ lze stále vybrat ručně; program potřebuje `ra`, `dec` a `v_jkc_mag`.
    správnou časovou zónu a light vyřešte přes volbu **Orientace…** ze tří
    hvězd. Jednoduché určení jediného světového směru nestačí.
 2. Otevřete kartu **Extinkce – experimentální**, vyberte light a CSV katalog.
+   Panel kalibračních korekcí ukazuje sdílený seznam darků a umožní výslovně
+   zvolit automatickou shodu podle EXIFu, vestavěný flat nebo pojmenovaný
+   vlastní profil vinětace.
 3. Zvolte **Tracker**, jsou-li hvězdy bodové, nebo **Pevný stativ**. U pevného
    stativu program každé hvězdě samostatně spočítá délku i směr stopy podle
    deklinace a času expozice; Polárka proto dostane téměř bodovou aperturu a
@@ -381,11 +384,18 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 ```
 
 Propustnost je normalizována na `T(0) = 1`. Výsledkem je JSON profil a kontrolní
-PNG graf naměřených bodů a křivek R/G/B. Po úspěšné kalibraci GUI nový JSON
+PNG graf naměřených bodů a křivek R/G/B společně s původní vestavěnou
+Hollanovou křivkou pro přímé porovnání. Protokol navíc porovná propustnost v
+normalizovaných poloměrech 0,5, 0,8 a 1,0. Po úspěšné kalibraci GUI nový JSON
 automaticky přidá také do trvalého správce. Na kartě **Jas oblohy** lze profily
-přidávat a odebírat; pro každý light se automaticky vybere shoda modelu
-fotoaparátu, objektivu a clony. Při běžném zpracování se každý Bayerův kanál
-opraví samostatně ještě před složením do fotopické luminance.
+přidávat, odebírat a pojmenovat například `Canon 600D + Sigma 4,5 mm`; pro
+každý light se automaticky vybere shoda modelu fotoaparátu, objektivu a clony.
+Při běžném zpracování se každý Bayerův kanál opraví samostatně ještě před
+složením do fotopické luminance.
+
+Vlastní profil **nahrazuje** vestavěnou Hollanovu korekci vinětace; obě korekce
+se nikdy nenásobí. Samotná kalibrační série se pouze opraví darkem a vestavěná
+křivka se na ni před měřením neaplikuje.
 
 Kalibrátor nyní vyžaduje, aby pro daný fotoaparát už existoval základní profil
 PyRaw2Lum s výřezem, středem a poloměrem obrazového kruhu. Pro budoucí Canon 6D
@@ -399,6 +409,11 @@ posledního úspěšného měření extinkce. Bouguerův fit extrapoluje jas hv�
 atmosféru. Nulový bod se pak porovná s osvětlením hvězdy `V = 0` a s
 prostorovým úhlem jednoho obrazového vzorku. Profil se uloží odděleně od
 vinětace a pro shodný fotoaparát, objektiv a clonu se používá automaticky.
+
+Vstup hvězdné kalibrace se před aperturní fotometrií kalibruje. Darky se
+vybírají podle fotoaparátu, ISO a expozice s tolerancí ±1 sekunda; flat / profil
+vinětace lze výslovně vybrat na kartě Extinkce. Karta i uložený JSON uvádějí
+konkrétní soubory a profil, které byly skutečně použity.
 
 Kalibrační snímek musí být bez oblačnosti a výrazných gradientů, mít dostatek
 nesaturovaných hvězd a široký rozsah vzdušné hmoty. Jde o experimentální

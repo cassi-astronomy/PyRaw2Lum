@@ -125,9 +125,12 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.extinction_max_v = tk.DoubleVar(value=6.0)
         self.extinction_aperture_mode = tk.StringVar(value="auto")
         self.extinction_aperture = tk.DoubleVar(value=2.5)
+        self.extinction_vignetting_choice = tk.StringVar()
+        self.extinction_vignetting_by_label: dict[str, str | None] = {}
         self.vignetting_registry = VignettingProfileRegistry()
         self.vignetting_entries: list[tuple[Path, object]] = []
         self.calibration_images: list[Path] = []
+        self.vignetting_description = tk.StringVar()
         self.target_shape = tk.StringVar(value="square")
         self.target_size = tk.IntVar(value=40)
         self.photometric_registry = StarCalibrationRegistry()
@@ -141,6 +144,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.astap_fov_height = tk.DoubleVar(value=17.0)
         self.messages: queue.Queue[tuple[str, object]] = queue.Queue()
         self._build()
+        self._refresh_lights()
+        self._refresh_darks()
         self._refresh_vignetting_profiles()
         self._refresh_photometric_profiles()
         self.after(100, self._poll_messages)
@@ -245,6 +250,9 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             profile_buttons, text="Přidat profil…", command=self._add_vignetting_profile
         ).pack(fill="x")
         ttk.Button(
+            profile_buttons, text="Upravit popis…", command=self._edit_vignetting_description
+        ).pack(fill="x", pady=(6, 0))
+        ttk.Button(
             profile_buttons, text="Odebrat profil", command=self._remove_vignetting_profiles
         ).pack(fill="x", pady=(6, 0))
         ttk.Label(
@@ -308,6 +316,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.log.pack(fill="x")
 
         extinction_tab = ttk.Frame(notebook, padding=18)
+        self.extinction_tab = extinction_tab
         notebook.add(extinction_tab, text="Extinkce – experimentální")
         self._build_extinction_tab(extinction_tab)
 
@@ -315,6 +324,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         notebook.add(vignetting_tab, text="Kalibrace vinětace")
         self._build_vignetting_tab(vignetting_tab)
         photometric_tab = ttk.Frame(notebook, padding=18)
+        self.photometric_tab = photometric_tab
         notebook.add(photometric_tab, text="Kalibrace sestavy – hvězdy")
         self._build_photometric_calibration_tab(photometric_tab)
         self._localize_widget_tree(notebook)
@@ -395,6 +405,38 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             state="readonly",
         )
         self.extinction_light_box.pack(side="left", fill="x", expand=True)
+
+        correction_box = ttk.LabelFrame(root, text="Kalibrační korekce RAWu", padding=8)
+        correction_box.pack(fill="x", pady=(8, 4))
+        ttk.Label(
+            correction_box,
+            text=(
+                "Darky jsou sdílené s kartou Jas oblohy. Pro light se automaticky "
+                "vyberou podle fotoaparátu, ISO a expozice ±1,0 s."
+            ),
+            wraplength=880,
+        ).pack(anchor="w", pady=(0, 5))
+        dark_row = ttk.Frame(correction_box)
+        dark_row.pack(fill="x")
+        self.extinction_dark_list = tk.Listbox(dark_row, height=2, selectmode="extended")
+        self.extinction_dark_list.pack(side="left", fill="x", expand=True)
+        self.extinction_dark_list.drop_target_register(DND_FILES)
+        self.extinction_dark_list.dnd_bind("<<Drop>>", self._drop_darks)
+        dark_buttons = ttk.Frame(dark_row)
+        dark_buttons.pack(side="left", padx=(8, 0))
+        ttk.Button(dark_buttons, text="Přidat dark…", command=self._add_darks).pack(fill="x")
+        ttk.Button(
+            dark_buttons, text="Odebrat", command=self._remove_extinction_darks
+        ).pack(fill="x", pady=(4, 0))
+        flat_row = ttk.Frame(correction_box)
+        flat_row.pack(fill="x", pady=(7, 0))
+        ttk.Label(flat_row, text="Flat / profil vinětace", width=21).pack(side="left")
+        self.extinction_vignetting_box = ttk.Combobox(
+            flat_row,
+            textvariable=self.extinction_vignetting_choice,
+            state="readonly",
+        )
+        self.extinction_vignetting_box.pack(side="left", fill="x", expand=True)
 
         self._path_row(
             root,
@@ -544,6 +586,17 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ).pack(side="left", padx=(8, 0))
         box = ttk.LabelFrame(root, text="Kalibrační RAW snímky", padding=10)
         box.pack(fill="x")
+        description_row = ttk.Frame(box)
+        description_row.pack(fill="x", pady=(0, 7))
+        ttk.Label(description_row, text="Popis profilu / sestavy", width=23).pack(side="left")
+        ttk.Entry(description_row, textvariable=self.vignetting_description).pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Label(
+            description_row,
+            text="např. Canon 600D + Sigma 4,5 mm",
+            foreground="#666666",
+        ).pack(side="left", padx=(8, 0))
         list_frame = ttk.Frame(box)
         list_frame.pack(side="left", fill="both", expand=True)
         self.calibration_list = tk.Listbox(list_frame, height=9, selectmode="extended")
@@ -610,13 +663,52 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         ttk.Label(
             root,
             text=(
-                "Postup: nejprve na kartě Extinkce změřte kvalitní bezoblačný snímek "
-                "s širokým rozsahem vzdušné hmoty. Potom zde vytvořte profil. Funkce je "
+                "Postup: na kartě Extinkce vyberte light, přiřaďte darky a flat / profil "
+                "vinětace a změřte kvalitní bezoblačný snímek s širokým rozsahem vzdušné "
+                "hmoty. Potom zde vytvořte profil. Funkce je "
                 "experimentální a nenahrazuje laboratorní kalibraci V(λ)."
             ),
             foreground="#555555",
             wraplength=920,
         ).pack(anchor="w", pady=(0, 12))
+        self.photometric_input_status = ttk.Label(
+            root,
+            text="Poslední kalibrovaný vstup: zatím nebylo provedeno měření extinkce.",
+            foreground="#555555",
+            wraplength=920,
+        )
+        self.photometric_input_status.pack(anchor="w", pady=(0, 10))
+        input_box = ttk.LabelFrame(root, text="Kalibrovaný vstup pro hvězdy", padding=8)
+        input_box.pack(fill="x", pady=(0, 10))
+        input_light_row = ttk.Frame(input_box)
+        input_light_row.pack(fill="x")
+        ttk.Label(input_light_row, text="Light RAW", width=21).pack(side="left")
+        self.photometric_light_box = ttk.Combobox(
+            input_light_row,
+            textvariable=self.extinction_light,
+            state="readonly",
+        )
+        self.photometric_light_box.pack(side="left", fill="x", expand=True)
+        input_dark_row = ttk.Frame(input_box)
+        input_dark_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(input_dark_row, text="Dark RAW", width=21).pack(side="left")
+        self.photometric_dark_summary = ttk.Label(input_dark_row, foreground="#555555")
+        self.photometric_dark_summary.pack(side="left", fill="x", expand=True)
+        ttk.Button(input_dark_row, text="Přidat dark…", command=self._add_darks).pack(side="left")
+        input_flat_row = ttk.Frame(input_box)
+        input_flat_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(input_flat_row, text="Flat / profil vinětace", width=21).pack(side="left")
+        self.photometric_vignetting_box = ttk.Combobox(
+            input_flat_row,
+            textvariable=self.extinction_vignetting_choice,
+            state="readonly",
+        )
+        self.photometric_vignetting_box.pack(side="left", fill="x", expand=True)
+        ttk.Button(
+            input_box,
+            text="Změřit kalibrovaný vstup a zobrazit extinkci",
+            command=self._measure_star_calibration_input,
+        ).pack(anchor="w", pady=(8, 0))
         astap_box = ttk.LabelFrame(
             root, text="Automatická astrometrie delšího objektivu (ASTAP)", padding=10
         )
@@ -778,6 +870,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             )
         values = [str(path) for path in self.lights]
         self.extinction_light_box.configure(values=values)
+        if hasattr(self, "photometric_light_box"):
+            self.photometric_light_box.configure(values=values)
         if self.extinction_light.get() not in values:
             self.extinction_light.set(values[0] if values else "")
 
@@ -1324,12 +1418,26 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             self._refresh_darks()
 
     def _refresh_darks(self) -> None:
-        self.dark_list.delete(0, "end")
-        for path in self.darks:
-            self.dark_list.insert("end", str(path))
+        for widget_name in ("dark_list", "extinction_dark_list"):
+            widget = getattr(self, widget_name, None)
+            if widget is None:
+                continue
+            widget.delete(0, "end")
+            for path in self.darks:
+                widget.insert("end", str(path))
+        if hasattr(self, "photometric_dark_summary"):
+            names = ", ".join(path.name for path in self.darks)
+            self.photometric_dark_summary.configure(
+                text=(names if names else tr("žádný dark nebyl přidán"))
+            )
 
     def _remove_darks(self) -> None:
         for index in reversed(self.dark_list.curselection()):
+            self.darks.pop(index)
+        self._refresh_darks()
+
+    def _remove_extinction_darks(self) -> None:
+        for index in reversed(self.extinction_dark_list.curselection()):
             self.darks.pop(index)
         self._refresh_darks()
 
@@ -1386,6 +1494,66 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.vignetting_profile_list.delete(0, "end")
         for _path, calibration in self.vignetting_entries:
             self.vignetting_profile_list.insert("end", profile_label(calibration))
+        self._refresh_extinction_vignetting_choices()
+
+    def _refresh_extinction_vignetting_choices(self) -> None:
+        box = getattr(self, "extinction_vignetting_box", None)
+        if box is None:
+            return
+        previous = self.extinction_vignetting_by_label.get(
+            self.extinction_vignetting_choice.get(), "__AUTO__"
+        )
+        automatic = tr("Automaticky podle EXIFu (jinak vestavěná korekce)")
+        built_in = tr("Vestavěná korekce sestavy")
+        mapping: dict[str, str | None] = {automatic: "__AUTO__", built_in: None}
+        for path, calibration in self.vignetting_entries:
+            label = profile_label(calibration)
+            if label in mapping:
+                label = f"{label} [{path.name}]"
+            mapping[label] = str(path)
+        self.extinction_vignetting_by_label = mapping
+        box.configure(values=list(mapping))
+        if hasattr(self, "photometric_vignetting_box"):
+            self.photometric_vignetting_box.configure(values=list(mapping))
+        selected = next(
+            (label for label, value in mapping.items() if value == previous), automatic
+        )
+        self.extinction_vignetting_choice.set(selected)
+
+    def _selected_extinction_vignetting_path(self, light: Path) -> str | None:
+        selection = self.extinction_vignetting_by_label.get(
+            self.extinction_vignetting_choice.get(), "__AUTO__"
+        )
+        if selection == "__AUTO__":
+            return self._automatic_vignetting_path(light)
+        return selection
+
+    def _measure_star_calibration_input(self) -> None:
+        self.notebook.select(self.extinction_tab)
+        self.after_idle(self._start_extinction)
+
+    def _edit_vignetting_description(self) -> None:
+        selection = tuple(self.vignetting_profile_list.curselection())
+        if len(selection) != 1:
+            messagebox.showerror(
+                "Vyberte jeden profil",
+                "Pro úpravu popisu vyberte právě jeden profil vinětace.",
+            )
+            return
+        path, calibration = self.vignetting_entries[selection[0]]
+        description = simpledialog.askstring(
+            "Popis profilu vinětace",
+            "Zadejte název sestavy nebo jiný popis (prázdné = bez popisu):",
+            initialvalue=calibration.description or "",
+            parent=self,
+        )
+        if description is None:
+            return
+        try:
+            self.vignetting_registry.update_description(path, description)
+            self._refresh_vignetting_profiles()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror("Popis nelze uložit", str(exc))
 
     def _remove_vignetting_profiles(self) -> None:
         selection = tuple(self.vignetting_profile_list.curselection())
@@ -1700,20 +1868,33 @@ class PyRaw2LumApp(TkinterDnD.Tk):
         self.vignetting_progress.start(12)
         threading.Thread(
             target=self._vignetting_worker,
-            args=(list(self.calibration_images), list(self.darks), output),
+            args=(
+                list(self.calibration_images),
+                list(self.darks),
+                output,
+                self.vignetting_description.get().strip(),
+            ),
             daemon=True,
         ).start()
 
     def _vignetting_worker(
-        self, calibration_images: list[Path], darks: list[Path], output: Path
+        self,
+        calibration_images: list[Path],
+        darks: list[Path],
+        output: Path,
+        description: str,
     ) -> None:
         try:
             calibration, measurements = calibrate_vignetting(
                 calibration_images,
                 darks,
+                description=description,
                 progress=lambda text: self.messages.put(("vign_log", text)),
             )
-            preview = make_vignetting_plot(calibration, measurements)
+            reference_profile = profile_for_camera(calibration.camera_model)
+            preview = make_vignetting_plot(
+                calibration, measurements, reference_profile=reference_profile
+            )
             preview_shown = threading.Event()
             self.messages.put(("vign_preview", (preview, preview_shown)))
             preview_shown.wait(timeout=2.0)
@@ -1748,7 +1929,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
             messagebox.showerror("Chybí katalog", "Vyberte existující CSV export Gaia GSPC.")
             return
         try:
-            vignetting_path = self._automatic_vignetting_path(light)
+            vignetting_path = self._selected_extinction_vignetting_path(light)
             photometric_path = self._automatic_photometric_path(light)
         except (OSError, ValueError) as exc:
             messagebox.showerror("Kalibrační profil nelze vybrat", str(exc))
@@ -1976,6 +2157,16 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                     aperture_path_text = (
                         f"Kontrola apertur: {paths[3]}" if len(paths) > 3 else ""
                     )
+                    dark_text = ", ".join(Path(path).name for path in result.darks_used)
+                    flat_text = (
+                        Path(result.vignetting_calibration_used).name
+                        if result.vignetting_calibration_used not in (None, "built-in")
+                        else tr("vestavěná korekce sestavy")
+                    )
+                    self.photometric_input_status.configure(
+                        text=tr("Poslední kalibrovaný vstup:")
+                        + f" {Path(result.source).name} · Dark: {dark_text} · Flat: {flat_text}"
+                    )
                     self._write_extinction(
                         "\nVÝSLEDEK (experimentální)\n"
                         f"Extinkce k: {result.extinction_mag_per_airmass:.4f} "
@@ -1985,6 +2176,7 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                         f"Rozsah vzdušné hmoty: {result.airmass_min:.2f}–{result.airmass_max:.2f}"
                         f"\nRMS fitu: {result.fit_rms_mag:.3f} mag"
                         f"{color}\nStřed expozice: {result.mid_exposure_utc}\n"
+                        f"Dark: {dark_text}\nFlat / vinětace: {flat_text}\n"
                         f"{aperture_text}\n"
                         f"JSON: {paths[0]}\nCSV hvězd: {paths[1]}\n"
                         f"Bouguerův graf: {paths[2]}\n"
@@ -2012,9 +2204,28 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                         f"{channel} {calibration.fit_rms_percent[channel]:.2f} %"
                         for channel in ("R", "G", "B")
                     )
+                    reference_profile = profile_for_camera(calibration.camera_model)
+                    comparison = []
+                    for radius in (0.5, 0.8, 1.0):
+                        original = float(
+                            np.polyval(reference_profile.vignetting_coefficients, radius)
+                        )
+                        green = math.exp(
+                            sum(
+                                coefficient * radius ** (2 * (index + 1))
+                                for index, coefficient in enumerate(
+                                    calibration.coefficients["G"]
+                                )
+                            )
+                        )
+                        comparison.append(
+                            f"r={radius:.1f}: nový G {green:.3f}, Hollan {original:.3f}"
+                        )
                     self._write_vignetting(
                         f"\nPROFIL ULOŽEN\n{profile_path}\nGraf: {plot_path}\n"
-                        f"RMS fitu: {rms}\nProfil byl přidán do automatického správce."
+                        f"RMS fitu: {rms}\n"
+                        + "Srovnání propustnosti: " + "; ".join(comparison) + "\n"
+                        "Profil byl přidán do automatického správce."
                     )
                     messagebox.showinfo(
                         "Kalibrace vinětace dokončena",

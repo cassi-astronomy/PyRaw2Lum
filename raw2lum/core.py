@@ -21,11 +21,24 @@ from .i18n import get_language, tr
 from .palette import colorize
 from .photometric_calibration import load_star_calibration
 from .profiles import InstrumentProfile, profile_for_camera
-from .vignetting import load_vignetting_calibration
+from .vignetting import VignettingCalibration, load_vignetting_calibration
 
 ARCSEC_RAD = math.pi / 180.0 / 3600.0
 ZERO_MAG_ILLUMINANCE = 2.54e-6
 MSA_LUMINANCE_ZERO = ZERO_MAG_ILLUMINANCE / (ARCSEC_RAD**2)
+
+
+def _vignetting_transmissions(
+    profile: InstrumentProfile,
+    custom: VignettingCalibration | None,
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return exactly one flat-field correction source for each RGB channel."""
+
+    if custom is not None:
+        return tuple(custom.transmission(channel, shape) for channel in ("R", "G", "B"))
+    built_in = profile.vignetting(shape)
+    return built_in, built_in, built_in
 
 
 @dataclass(frozen=True)
@@ -392,18 +405,15 @@ def analyze_raw(
     if vignetting_calibration_path:
         custom_vignetting = load_vignetting_calibration(vignetting_calibration_path)
         custom_vignetting.validate_for(profile, light_exif.aperture)
-        corrected_red = red[0] / custom_vignetting.transmission("R", red[0].shape)
-        corrected_green = (
-            (green[0] + green[1]) / 2.0
-        ) / custom_vignetting.transmission("G", green[0].shape)
-        corrected_blue = blue[0] / custom_vignetting.transmission("B", blue[0].shape)
-        relative_red = rr * corrected_red
-        relative_green = gg * corrected_green
-        relative_blue = bb * corrected_blue
-    else:
-        relative_red = rr * red[0]
-        relative_green = gg * (green[0] + green[1]) / 2.0
-        relative_blue = bb * blue[0]
+    transmission_r, transmission_g, transmission_b = _vignetting_transmissions(
+        profile, custom_vignetting, red[0].shape
+    )
+    # A measured flat replaces the built-in Hollan curve. They are deliberately
+    # selected above as mutually exclusive alternatives and never multiplied.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        relative_red = rr * red[0] / transmission_r
+        relative_green = gg * (green[0] + green[1]) / 2.0 / transmission_g
+        relative_blue = bb * blue[0] / transmission_b
     calibration_divisor = profile.calibration_divisor
     if photometric_calibration_path:
         star_calibration = load_star_calibration(photometric_calibration_path)
@@ -418,12 +428,6 @@ def analyze_raw(
     relative_red = relative_red.astype(np.float64) / exposure_factor
     relative_green = relative_green.astype(np.float64) / exposure_factor
     relative_blue = relative_blue.astype(np.float64) / exposure_factor
-    if custom_vignetting is None:
-        vignetting = profile.vignetting(relative_red.shape)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            relative_red = relative_red / vignetting
-            relative_green = relative_green / vignetting
-            relative_blue = relative_blue / vignetting
     luminance = wr * relative_red + wg * relative_green + wb * relative_blue
     # Zaporne hodnoty po odectu darku jsou sum kolem nuly, nikoli zaporna
     # fyzikalni luminance. V numerickych vystupech je proto znacime jako NaN.

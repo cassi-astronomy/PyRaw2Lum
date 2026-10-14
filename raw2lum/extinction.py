@@ -86,6 +86,9 @@ class ExtinctionResult:
     aperture_test_radii_px: tuple[float, ...] = ()
     aperture_growth_curve: tuple[float, ...] = ()
     aperture_calibration_stars: int = 0
+    darks_used: tuple[str, ...] = ()
+    vignetting_calibration_used: str | None = None
+    photometric_calibration_used: str | None = None
 
     def report(self) -> dict[str, object]:
         result = asdict(self)
@@ -564,6 +567,14 @@ def measure_extinction(
         vignetting_calibration_path=vignetting_calibration_path,
         photometric_calibration_path=photometric_calibration_path,
     )
+    notify(
+        "Dark korekce: "
+        + (", ".join(path.name for path in result.darks_used) or "zadny dark")
+    )
+    notify(
+        "Flat / vinetace: "
+        + (result.vignetting_calibration or "vestavena korekce sestavy")
+    )
     if result.captured_at_utc is None:
         raise ValueError("RAW nema pouzitelny cas expozice.")
     stars = load_gaia_gspc_csv(catalog_path, max_v_mag=maximum_v_mag)
@@ -769,6 +780,9 @@ def measure_extinction(
         aperture_test_radii_px=aperture_test_radii,
         aperture_growth_curve=aperture_growth_curve,
         aperture_calibration_stars=aperture_calibration_stars,
+        darks_used=tuple(str(path) for path in result.darks_used),
+        vignetting_calibration_used=(result.vignetting_calibration or "built-in"),
+        photometric_calibration_used=result.photometric_calibration,
         measurements=final_measurements,
     )
 

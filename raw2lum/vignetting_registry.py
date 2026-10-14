@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 from pathlib import Path
 import re
 import shutil
@@ -71,6 +72,15 @@ class VignettingProfileRegistry:
             raise ValueError("Profil neni ulozen ve spravovane slozce PyRaw2Lum.")
         target.unlink(missing_ok=True)
 
+    def update_description(self, path: str | Path, description: str | None) -> Path:
+        target = Path(path).resolve()
+        root = self.directory.resolve()
+        if target.parent != root or target.suffix.lower() != ".json":
+            raise ValueError("Profil neni ulozen ve spravovane slozce PyRaw2Lum.")
+        calibration = load_vignetting_calibration(target)
+        updated = replace(calibration, description=(description or "").strip() or None)
+        return save_vignetting_calibration(updated, target)
+
     def match(self, exif, instrument_profile) -> Path | None:
         candidates: list[tuple[float, Path]] = []
         for path, calibration in self.entries():
@@ -92,4 +102,5 @@ class VignettingProfileRegistry:
 
 def profile_label(calibration: VignettingCalibration) -> str:
     lens = calibration.lens_model_exif or calibration.lens_name
-    return f"{calibration.camera_model} | {lens} | f/{calibration.aperture:g}"
+    setup = f"{calibration.camera_model} | {lens} | f/{calibration.aperture:g}"
+    return f"{calibration.description} — {setup}" if calibration.description else setup

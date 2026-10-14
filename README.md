@@ -271,7 +271,10 @@ be selected; `ra`, `dec`, and `v_jkc_mag` are required.
 1. On **Sky brightness**, add the light and matching darks, select the correct
    time zone, and obtain a three-star astrometric solution. One-direction
    orientation is insufficient.
-2. On **Extinction – experimental**, select that light and the Gaia CSV.
+2. On **Extinction – experimental**, select that light and the Gaia CSV. The
+   calibration-corrections panel displays the shared dark list and lets you
+   explicitly select either automatic EXIF matching, the built-in flat, or a
+   named custom vignetting profile.
 3. Choose **Tracker** for point-like stars or **Fixed tripod**. Fixed-tripod
    mode computes an individual trail length and direction from declination and
    exposure time for every star.
@@ -329,10 +332,17 @@ T(r) = exp(a1·r² + a2·r⁴ + a3·r⁶)
 ```
 
 Transmission is normalized to `T(0) = 1`. The resulting JSON profile and PNG
-control plot show the measured points and R/G/B curves. The GUI automatically
+control plot show the measured points and R/G/B curves together with the
+original built-in Hollan curve for direct comparison. The log also compares
+transmission at normalized radii 0.5, 0.8, and 1.0. The GUI automatically
 adds a successful profile to its persistent manager. Profiles can be added and
-removed on the **Sky brightness** tab, and each light automatically receives a
+removed on the **Sky brightness** tab, given a human-readable instrument name
+such as `Canon 600D + Sigma 4.5 mm`, and each light automatically receives a
 matching camera, lens, and aperture profile.
+
+A custom profile **replaces** the built-in Hollan vignetting correction; the
+two corrections are never multiplied. The calibration series itself is only
+dark-subtracted and is not pre-corrected with the built-in curve.
 
 The calibrator still needs a basic PyRaw2Lum camera/lens profile containing the
 crop, centre, and image-circle radius. A future Canon 6D Mark I + 8 mm fisheye
@@ -346,6 +356,11 @@ extrapolates stellar brightness above the atmosphere. Its zero point is then
 compared with the illuminance of a `V = 0` star and the solid angle of one image
 sample. The result is stored separately from vignetting and selected
 automatically for the same camera, lens, and aperture.
+
+The stellar-calibration input is calibrated before aperture photometry. Darks
+are matched by camera, ISO, and exposure within ±1 second, while the flat /
+vignetting profile is explicitly selectable on the Extinction tab. The tab and
+the saved JSON record the files and profile that were actually used.
 
 Use a cloud-free calibration image with many unsaturated stars, weak background
 gradients, and a broad air-mass range. This experimental calibration
