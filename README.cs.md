@@ -211,14 +211,20 @@ poloh až přibližně o 0,375° vůči středu stop u hvězd poblíž nebeskéh
 
 ### Výsledná orientace
 
-Při jednoduché orientaci se kruhová mapa pouze otočí bez vytváření mezibarev.
-Při hvězdné orientaci se mapa geometricky převzorkuje do skutečného zenitu:
+Při jednoduché i hvězdné orientaci se kruhová mapa pouze pevně otočí bez
+vytváření mezibarev:
 
 - sever je nahoře,
 - východ vlevo,
 - jih dole,
 - západ vpravo,
-- nakloněný horizont se opraví.
+- původní tvar stromů, budov a okraje zorného pole zůstane zachovaný.
+
+Při náklonu fotoaparátu nemusí skutečný zenit ležet uprostřed kruhové mapy.
+Matematický horizont a výškové čáry se proto promítnou do původní geometrie
+RAWu jako správně posunuté, obecně nesoustředné křivky. Tím se pozemní objekty
+neohnou do umělých kruhových oblouků. Úplné geometrické narovnání se nadále
+používá pro panorama.
 
 Kruhová mapa představuje pohled vzhůru na oblohu. Panorama používá přirozený
 pohled ven směrem k obzoru, má sever uprostřed a pořadí zleva doprava
@@ -227,12 +233,13 @@ Zenit je nahoře. Bílá čára označuje matematický horizont a pod ní zůst�
 pás kalibrovaného obrazu, takže se neodříznou blízké objekty a světla.
 
 Stejné pravidlo používají kruhové mapy MSA, luminance i barvy. Volitelná tenká
-černobílá kontrastní kružnice označuje skutečnou výšku 0°. Nejde o masku:
+černobílá kontrastní křivka označuje skutečnou výšku 0°. Nejde o masku:
 zůstane zobrazený celý dostupný čtvercový výřez RAWu včetně stromů, budov a
 světel za poloměrem kalibrované vinětace. Tyto vnější pixely zachovávají obrazový
 kontext, ale nemají zaručenou přesnost absolutní fotometrie. Druhá volitelná
-vrstva přidá bílé kružnice s černým lemem ve výškách 10°, 20°, …, 80° a značku
-zenitu v 90°. Obě vrstvy se počítají pouze po úplném řešení z více hvězd,
+vrstva přidá bílé křivky s černým lemem ve výškách 10°, 20°, …, 80° a značku
+zenitu v 90°. Při náklonu jsou křivky záměrně nesoustředné. Obě vrstvy se
+počítají pouze po úplném řešení z více hvězd,
 protože jediný světový směr nedokáže určit náklon fotoaparátu. Umělá kruhová
 maska se nepoužívá. Horizont je ve výchozím nastavení zapnutý, výšková síť
 vypnutá.

@@ -7,6 +7,7 @@ import raw2lum.rendering as rendering
 from raw2lum.rendering import (
     _draw_altitude_circles,
     _draw_true_horizon_circle,
+    _project_altitude_segments,
 )
 
 
@@ -26,7 +27,7 @@ def test_horizon_is_line_not_mask_and_requires_full_orientation() -> None:
     _draw_true_horizon_circle(draw, _result(), 0, 0, 20, 20, 1)
 
     # r_horizon = sin(45°) * 10 ~= 7.07; data outside it remain untouched.
-    assert image.getpixel((10, 1)) == (120, 40, 20)
+    assert image.getpixel((10, 0)) == (120, 40, 20)
     assert image.getpixel((10, 3)) != (120, 40, 20)
 
     without_solution = Image.new("RGB", (20, 20), (120, 40, 20))
@@ -66,6 +67,22 @@ def test_altitude_grid_is_optional_and_requires_full_orientation() -> None:
             ImageDraw.Draw(disabled), result, 0, 0, 20, 20, 1
         )
         assert all(pixel == base for pixel in disabled.getdata())
+
+
+def test_tilted_round_map_projects_off_center_curves_without_warping_pixels() -> None:
+    angle = np.deg2rad(18.0)
+    tilted = _result()
+    tilted.orientation_matrix = np.asarray(
+        (
+            (np.cos(angle), 0.0, np.sin(angle)),
+            (0.0, 1.0, 0.0),
+            (-np.sin(angle), 0.0, np.cos(angle)),
+        )
+    )
+    segments = _project_altitude_segments(tilted, 0.0, 40, 40, 2)
+    points = np.asarray([point for segment in segments for point in segment])
+    radii = np.hypot(points[:, 0] - 20.0, points[:, 1] - 20.0)
+    assert np.ptp(radii) > 2.0
 
 
 def test_round_map_compass_places_east_left_and_west_right(monkeypatch) -> None:

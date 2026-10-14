@@ -182,20 +182,24 @@ hemispheres, based on the
 For long exposures, mark approximately the centre of a short star trail. Star
 positions are calculated for mid-exposure rather than the EXIF start time.
 
-With a star solution, the circular map is resampled to the true zenith: north
-is up, east left, south down, and west right, as in an overhead view of the
-sky. The panorama uses the natural outward-facing horizon view, has north at
-the centre, and runs **S – W – N – E – S** from left to right. Its white line marks
-the mathematical horizon; a narrow calibrated strip remains below it so nearby
-objects and lights are not cut off.
+With a star solution, the circular map keeps the original RAW geometry and is
+only rigidly rotated: north is up, east left, south down, and west right. This
+preserves trees, buildings, and the real edge of the fisheye field instead of
+bending them into artificial arcs when the camera was tilted. The true zenith
+may therefore lie away from the image centre. The panorama remains a fully
+rectified outward-facing horizon view, has north at the centre, and runs
+**S – W – N – E – S** from left to right. Its white line marks the mathematical
+horizon; a narrow calibrated strip remains below it so nearby objects and
+lights are not cut off.
 
 The circular MSA, luminance, and colour maps follow the same rule. An optional
-high-contrast black-and-white line marks true altitude 0°. It is not a mask:
+high-contrast black-and-white curve marks true altitude 0°. It is not a mask:
 the complete available square RAW crop remains visible, including trees,
 buildings, and lights outside the radius covered by the vignetting calibration.
 Those outer pixels provide visual context but do not have guaranteed absolute
-photometric accuracy. A second optional overlay adds black-edged white circles
-at altitudes 10°, 20°, …, 80° and marks the 90° zenith.
+photometric accuracy. With a tilted camera, this horizon and the optional
+10°–80° altitude curves are intentionally off-centre; the 90° zenith marker
+shows the actual zenith position.
 Both overlays are calculated only after a full multi-star solution because a
 single compass direction cannot determine camera tilt. No artificial circular
 image mask is applied. The horizon overlay is enabled by default; the altitude

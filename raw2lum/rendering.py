@@ -74,6 +74,109 @@ def orient_image_north_up(
     )
 
 
+def _round_map_north_angle(result: AnalysisResult) -> float | None:
+    """Image-plane direction of geographic north for a non-warped round map."""
+
+    if result.orientation_matrix is None:
+        return result.north_angle_deg
+    north_camera = np.asarray(result.orientation_matrix, dtype=np.float64).T @ np.asarray(
+        (0.0, 1.0, 0.0), dtype=np.float64
+    )
+    return math.degrees(math.atan2(float(north_camera[1]), float(north_camera[0])))
+
+
+def _project_altitude_segments(
+    result: AnalysisResult,
+    altitude_deg: float,
+    map_width: int,
+    map_height: int,
+    display_scale: int,
+) -> list[list[tuple[float, float]]]:
+    """Project a horizontal small circle while preserving the original RAW geometry."""
+
+    altitude = math.radians(altitude_deg)
+    azimuth = np.linspace(0.0, 2.0 * math.pi, 1441, endpoint=True)
+    world = np.vstack(
+        (
+            math.cos(altitude) * np.sin(azimuth),
+            math.cos(altitude) * np.cos(azimuth),
+            np.full_like(azimuth, math.sin(altitude)),
+        )
+    )
+    camera = np.asarray(result.orientation_matrix, dtype=np.float64).T @ world
+    zenith_distance = np.arccos(np.clip(camera[2], -1.0, 1.0))
+    radius = np.sin(zenith_distance / 2.0) * _projection_radius_scale(result) * display_scale
+    angle = np.arctan2(camera[1], camera[0])
+    cx, cy = map_width / 2.0, map_height / 2.0
+    source_x = cx + radius * np.cos(angle)
+    source_y = cy + radius * np.sin(angle)
+    source_valid = (
+        np.isfinite(source_x)
+        & np.isfinite(source_y)
+        & (source_x >= 0.0)
+        & (source_x < map_width)
+        & (source_y >= 0.0)
+        & (source_y < map_height)
+    )
+
+    north_angle = _round_map_north_angle(result)
+    rotation = math.radians((north_angle if north_angle is not None else -90.0) + 90.0)
+    dx, dy = source_x - cx, source_y - cy
+    target_x = cx + math.cos(rotation) * dx + math.sin(rotation) * dy
+    target_y = cy - math.sin(rotation) * dx + math.cos(rotation) * dy
+
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+    for x, y, valid in zip(target_x, target_y, source_valid):
+        if valid:
+            current.append((float(x), float(y)))
+        elif current:
+            if len(current) >= 2:
+                segments.append(current)
+            current = []
+    if len(current) >= 2:
+        segments.append(current)
+    return segments
+
+
+def _draw_projected_altitude_curve(
+    draw: ImageDraw.ImageDraw,
+    result: AnalysisResult,
+    altitude_deg: float,
+    map_left: int,
+    map_top: int,
+    map_width: int,
+    map_height: int,
+    display_scale: int,
+    label: str | None = None,
+) -> None:
+    segments = _project_altitude_segments(
+        result, altitude_deg, map_width, map_height, display_scale
+    )
+    if not segments:
+        return
+    shifted = [
+        [(map_left + x, map_top + y) for x, y in segment] for segment in segments
+    ]
+    halo_width = max(3, display_scale * 3)
+    line_width = max(1, display_scale)
+    for segment in shifted:
+        draw.line(segment, fill=(0, 0, 0), width=halo_width, joint="curve")
+        draw.line(segment, fill=(255, 255, 255), width=line_width, joint="curve")
+    if label:
+        longest = max(shifted, key=len)
+        x, y = longest[len(longest) // 8]
+        font = _font(max(9, 8 * display_scale))
+        draw.text(
+            (x + 2 * display_scale, y - 8 * display_scale),
+            label,
+            font=font,
+            fill=(255, 255, 255),
+            stroke_width=max(1, display_scale),
+            stroke_fill=(0, 0, 0),
+        )
+
+
 def _draw_true_horizon_circle(
     draw: ImageDraw.ImageDraw,
     result: AnalysisResult,
@@ -91,20 +194,9 @@ def _draw_true_horizon_circle(
         result, "show_horizon_circle", True
     ):
         return
-    radius = math.sin(math.pi / 4.0) * _projection_radius_scale(result) * display_scale
-    # The horizon may lie just outside the radius with calibrated vignetting.
-    # It is still geometrically valid and can be drawn over the retained RAW
-    # pixels or the surrounding frame. Suppress it only when it cannot
-    # intersect the square map at all.
-    visible_limit = math.hypot(map_width / 2.0, map_height / 2.0)
-    if not math.isfinite(radius) or radius <= 0 or radius > visible_limit:
-        return
-    cx = map_left + map_width / 2.0
-    cy = map_top + map_height / 2.0
-    bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
-    # Dark halo keeps the neutral line readable over every palette colour.
-    draw.ellipse(bounds, outline=(0, 0, 0), width=max(3, display_scale * 3))
-    draw.ellipse(bounds, outline=(255, 255, 255), width=max(1, display_scale))
+    _draw_projected_altitude_curve(
+        draw, result, 0.0, map_left, map_top, map_width, map_height, display_scale
+    )
 
 
 def _draw_altitude_circles(
@@ -122,37 +214,28 @@ def _draw_altitude_circles(
         result, "show_altitude_circles", False
     ):
         return
-    scale = _projection_radius_scale(result) * display_scale
-    visible_limit = math.hypot(map_width / 2.0, map_height / 2.0)
-    cx = map_left + map_width / 2.0
-    cy = map_top + map_height / 2.0
-    line_width = max(1, display_scale)
-    font = _font(max(9, 8 * display_scale))
     for altitude_deg in range(10, 90, 10):
-        zenith_distance = math.radians(90.0 - altitude_deg)
-        radius = math.sin(zenith_distance / 2.0) * scale
-        if not math.isfinite(radius) or radius <= 0 or radius > visible_limit:
-            continue
-        bounds = (cx - radius, cy - radius, cx + radius, cy + radius)
-        draw.ellipse(bounds, outline=(0, 0, 0), width=max(3, display_scale * 3))
-        draw.ellipse(bounds, outline=(255, 255, 255), width=line_width)
-        label = f"{altitude_deg}°"
-        box = draw.textbbox((0, 0), label, font=font)
-        diagonal = radius / math.sqrt(2.0)
-        label_x = cx + diagonal - (box[2] - box[0]) - 2 * display_scale
-        label_y = cy - diagonal - (box[3] - box[1]) / 2.0
-        draw.text(
-            (label_x, label_y),
-            label,
-            font=font,
-            fill=(255, 255, 255),
-            stroke_width=max(1, display_scale),
-            stroke_fill=(0, 0, 0),
+        _draw_projected_altitude_curve(
+            draw,
+            result,
+            float(altitude_deg),
+            map_left,
+            map_top,
+            map_width,
+            map_height,
+            display_scale,
+            label=f"{altitude_deg}°",
         )
 
     # Altitude 90° is a point, not a circle.
+    zenith = _project_altitude_segments(result, 89.999, map_width, map_height, display_scale)
+    if not zenith:
+        return
+    point = zenith[0][0]
+    cx, cy = map_left + point[0], map_top + point[1]
     arm = max(3, 3 * display_scale)
     halo_width = max(3, display_scale * 3)
+    line_width = max(1, display_scale)
     draw.line((cx - arm, cy, cx + arm, cy), fill=(0, 0, 0), width=halo_width)
     draw.line((cx, cy - arm, cx, cy + arm), fill=(0, 0, 0), width=halo_width)
     draw.line((cx - arm, cy, cx + arm, cy), fill=(255, 255, 255), width=line_width)
@@ -202,12 +285,10 @@ def render_map(result: AnalysisResult, output_path: str | Path, display_scale: i
     if display_scale not in (1, 2, 3):
         raise ValueError("Prezentační meritko musi byt 1, 2 nebo 3.")
     output_path = Path(output_path)
-    if result.orientation_matrix is not None:
-        values = reproject_fisheye_north_up(result.luminance_cd_m2, result)
-        map_image = Image.fromarray(colorize(values), mode="RGB")
-    else:
-        map_image = Image.fromarray(result.color_map, mode="RGB")
-        map_image = orient_image_north_up(map_image, result.north_angle_deg)
+    # Preserve the original RAW geometry in round maps. Full zenith reprojection
+    # bends trees and buildings into artificial arcs when the camera is tilted.
+    map_image = Image.fromarray(result.color_map, mode="RGB")
+    map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
     if display_scale != 1:
         map_image = map_image.resize(
             (map_image.width * display_scale, map_image.height * display_scale),
@@ -305,14 +386,9 @@ def render_luminance_map(
     if display_scale not in (1, 2, 3):
         raise ValueError("Prezentační meritko musi byt 1, 2 nebo 3.")
     output_path = Path(output_path)
-    values = (
-        reproject_fisheye_north_up(result.luminance_cd_m2, result)
-        if result.orientation_matrix is not None
-        else result.luminance_cd_m2
-    )
-    rgb = colorize_hollan_luminance(values)
+    rgb = colorize_hollan_luminance(result.luminance_cd_m2)
     map_image = Image.fromarray(rgb, mode="RGB")
-    map_image = orient_image_north_up(map_image, result.north_angle_deg)
+    map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
     if display_scale != 1:
         map_image = map_image.resize(
             (map_image.width * display_scale, map_image.height * display_scale),
@@ -488,13 +564,7 @@ def render_blue_fraction_map(
     if display_scale not in (1, 2, 3):
         raise ValueError("Prezentační meritko musi byt 1, 2 nebo 3.")
     channels = (result.relative_red, result.relative_green, result.relative_blue)
-    if result.orientation_matrix is not None:
-        channels = tuple(reproject_fisheye_north_up(channel, result) for channel in channels)
-    valid = np.isfinite(
-        reproject_fisheye_north_up(result.blue_fraction, result)
-        if result.orientation_matrix is not None
-        else result.blue_fraction
-    )
+    valid = np.isfinite(result.blue_fraction)
     smoothed = []
     for channel in channels:
         masked = np.where(valid, channel, np.nan)
@@ -505,8 +575,7 @@ def render_blue_fraction_map(
     good = valid & np.isfinite(total) & (red > 0) & (green > 0) & (blue > 0)
     values[good] = blue[good] / total[good]
     map_image = Image.fromarray(_colorize_blue_fraction(values), mode="RGB")
-    if result.orientation_matrix is None:
-        map_image = orient_image_north_up(map_image, result.north_angle_deg)
+    map_image = orient_image_north_up(map_image, _round_map_north_angle(result))
     if display_scale != 1:
         map_image = map_image.resize(
             (map_image.width * display_scale, map_image.height * display_scale),
