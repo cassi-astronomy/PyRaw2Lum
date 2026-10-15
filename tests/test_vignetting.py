@@ -81,6 +81,19 @@ class VignettingTests(unittest.TestCase):
         self.assertAlmostEqual(fluxes["G"] / fluxes["R"], 2.0, delta=0.03)
         self.assertAlmostEqual(fluxes["B"] / fluxes["R"], 0.5, delta=0.03)
 
+    def test_artificial_source_clipped_by_field_edge_is_rejected(self) -> None:
+        shape = (120, 120)
+        red = np.full(shape, 100.0)
+        green = np.full(shape, 100.0)
+        blue = np.full(shape, 100.0)
+        red[54:67, 0:7] += 500.0
+        green[54:67, 0:7] += 1000.0
+        blue[54:67, 0:7] += 250.0
+        with self.assertRaisesRegex(ValueError, "useknuty okrajem"):
+            measure_artificial_source(
+                red, green, blue, np.zeros(shape, dtype=bool), max_radius_px=85.0
+            )
+
     def test_robust_radial_fit_recovers_profile_with_outlier(self) -> None:
         radius = np.linspace(0.0, 0.95, 24)
         expected = np.asarray([-0.45, -0.22, -0.08])
@@ -152,6 +165,7 @@ class VignettingTests(unittest.TestCase):
             coefficients={"R": (-0.2,), "G": (-0.25,), "B": (-0.3,)},
             fit_rms_percent={"R": 1.0, "G": 1.0, "B": 1.0},
             projection="rectilinear",
+            rejected_files=({"source": "outside.CR2", "reason": "outside"},),
         )
         exif = SimpleNamespace(
             camera_model="Canon EOS 600D",
@@ -163,6 +177,7 @@ class VignettingTests(unittest.TestCase):
             path = registry.store(calibration)
             loaded = load_vignetting_calibration(path)
             self.assertEqual(loaded.projection, "rectilinear")
+            self.assertEqual(loaded.rejected_files[0]["source"], "outside.CR2")
             self.assertEqual(registry.match(exif, profile), path)
             transmission = loaded.transmission("G", (1732, 2601))
             self.assertAlmostEqual(transmission[866, 1300], 1.0, places=6)

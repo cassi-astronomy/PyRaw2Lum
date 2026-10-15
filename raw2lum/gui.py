@@ -2326,6 +2326,8 @@ class PyRaw2LumApp(TkinterDnD.Tk):
                             comparison.append(f"r={radius:.1f}: propustnost G {green:.3f}")
                     self._write_vignetting(
                         f"\nPROFIL ULOŽEN\n{profile_path}\nGraf: {plot_path}\n"
+                        f"Použitá měření: {len(calibration.measurements)}; "
+                        f"vyřazeno: {len(calibration.rejected_files)}\n"
                         f"RMS fitu: {rms}\n"
                         + "Srovnání propustnosti: " + "; ".join(comparison) + "\n"
                         "Profil byl přidán do automatického správce."

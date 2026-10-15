@@ -116,7 +116,10 @@ def measure_artificial_source(
     peak_y, peak_x = np.unravel_index(peak_index, smoothed.shape)
     peak = float(smoothed[peak_y, peak_x])
     if not math.isfinite(peak) or peak <= background + max(10.0 * noise, 1e-6):
-        raise ValueError("Nebyl nalezen dostatecne vyrazny svetelny zdroj.")
+        raise ValueError(
+            "Uvnitř kalibrovaného pole nebyl nalezen dostatečně výrazný zdroj; "
+            "může být příliš slabý nebo mimo obrazový kruh."
+        )
 
     search_radius = max(18, round(min(height, width) * 0.055))
     y0, y1 = max(0, peak_y - search_radius), min(height, peak_y + search_radius + 1)
@@ -127,6 +130,13 @@ def measure_artificial_source(
     if np.count_nonzero(component) < 2:
         raise ValueError("Svetelny zdroj je prilis maly nebo slaby.")
     aperture = _dilate(component, 4)
+    if (
+        np.any(aperture[0, :])
+        or np.any(aperture[-1, :])
+        or np.any(aperture[:, 0])
+        or np.any(aperture[:, -1])
+    ):
+        raise ValueError("Svetelny zdroj je useknuty okrajem kalibrovaneho pole.")
     outer = _dilate(aperture, 10)
     annulus = outer & ~_dilate(aperture, 3)
     if np.count_nonzero(annulus) < 30:
@@ -203,6 +213,7 @@ def calibrate_vignetting(
             f"kalibracni snimky maji f/{first_exif.aperture:g}."
         )
     measurements: list[SourceMeasurement] = []
+    rejected: list[dict[str, str]] = []
     for number, image_path in enumerate(images, start=1):
         exif = read_exif(image_path)
         if exif.camera_model != first_exif.camera_model:
@@ -250,9 +261,17 @@ def calibrate_vignetting(
                 light[1::2, 1::2] >= white_level * 0.98,
             ]
         )
-        x, y, fluxes, saturated = measure_artificial_source(
-            red, green, blue, saturation, profile.max_calibrated_radius
-        )
+        try:
+            x, y, fluxes, saturated = measure_artificial_source(
+                red, green, blue, saturation, profile.max_calibrated_radius
+            )
+        except ValueError as exc:
+            reason = str(exc)
+            rejected.append({"source": str(image_path), "reason": reason})
+            notify(
+                f"{number}/{len(images)}: {image_path.name}, PRESKOCENO: {reason}"
+            )
+            continue
         if saturated:
             raise ValueError(f"Zdroj je na snimku {image_path.name} saturovany.")
         exposure_scale = exif.iso * exif.exposure_s / (exif.aperture**2)
@@ -271,6 +290,11 @@ def calibrate_vignetting(
         )
         notify(f"{number}/{len(images)}: {image_path.name}, r={radius/profile.max_calibrated_radius:.3f}")
 
+    if len(measurements) < 10:
+        raise ValueError(
+            f"Po vyrazeni nepouzitelnych snimku zbylo jen {len(measurements)} mereni; "
+            "je potreba alespon 10."
+        )
     radius = np.asarray([item.normalized_radius for item in measurements])
     if float(np.min(radius)) > 0.18:
         raise ValueError("Chybi snimek zdroje blizko stredu (r < 0,18 polomeru).")
@@ -295,6 +319,7 @@ def calibrate_vignetting(
         lens_model_exif=first_exif.lens_model,
         source_files=tuple(str(path) for path in images),
         measurements=tuple(item.report() for item in measurements),
+        rejected_files=tuple(rejected),
         projection=profile.projection,
     )
     calibration.validate_for(profile, first_exif.aperture)

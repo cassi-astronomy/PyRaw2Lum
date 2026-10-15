@@ -406,6 +406,12 @@ zavře se libovolnou klávesou, takže jej lze přímo fotografovat.
 - průběžně opakujte středovou polohu pro kontrolu stability zdroje,
 - pořiďte odpovídající darky; přidávají se na kartě **Jas oblohy**.
 
+Snímky, na kterých je zdroj mimo kalibrované pole, nelze jej spolehlivě najít
+nebo je useknutý okrajem obrazu, se zaznamenají jako vyřazené a přeskočí. Už
+neukončí celou sérii; po vyřazení však musí zbýt alespoň deset platných měření.
+To je důležité hlavně u rybího oka, kde může být poslední poloha ještě vidět v
+celém obdélníkovém RAWu, ale už leží za hranicí obrazového kruhu.
+
 Program v každém snímku automaticky vyhledá jediný výrazný zdroj, změří jeho
 integrální tok odděleně v Bayerových kanálech R, G a B, odečte místní pozadí a
 odmítne saturaci. Pro každý kanál robustně fituje kladný radiální model:

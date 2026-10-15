@@ -353,6 +353,13 @@ closes it, so it can be photographed directly.
 - repeat the centre position to monitor source stability,
 - add matching darks on the **Sky brightness** tab.
 
+Frames in which the source is outside the calibrated field, cannot be found,
+or is clipped by the image boundary are recorded as rejected and skipped. They
+no longer abort the whole series. At least ten valid measurements must remain.
+This is especially useful for a fisheye sequence whose last step can already
+lie just beyond the image circle even though the source remains visible in the
+camera's full rectangular RAW.
+
 The source is found automatically. Its integrated flux is measured separately
 in Bayer R, G, and B after local-background subtraction, and saturation is
 rejected. Each channel receives a positive radial model:

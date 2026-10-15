@@ -23,6 +23,7 @@ class VignettingCalibration:
     lens_model_exif: str | None = None
     source_files: tuple[str, ...] = ()
     measurements: tuple[dict[str, object], ...] = ()
+    rejected_files: tuple[dict[str, str], ...] = ()
     schema_version: int = 1
     model: str = "radial_log_even"
     projection: str = "fisheye_equisolid"
@@ -83,6 +84,7 @@ class VignettingCalibration:
             "fit_rms_percent": self.fit_rms_percent,
             "source_files": list(self.source_files),
             "measurements": list(self.measurements),
+            "rejected_files": list(self.rejected_files),
         }
 
 
@@ -129,6 +131,10 @@ def load_vignetting_calibration(path: str | Path) -> VignettingCalibration:
             },
             source_files=tuple(str(value) for value in data.get("source_files", ())),
             measurements=tuple(dict(value) for value in data.get("measurements", ())),
+            rejected_files=tuple(
+                {str(key): str(value) for key, value in dict(item).items()}
+                for item in data.get("rejected_files", ())
+            ),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"Soubor {source.name} neni platny profil vinetace.") from exc
